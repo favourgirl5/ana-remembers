@@ -76,3 +76,6 @@ def run_checkin(patient_id):
     session_id = store_session(patient_id, medication_taken, summary)
     print(f"[Saved session {session_id}] medication_taken={medication_taken}")
     print(f"[Summary] {summary}")
+
+if __name__ == "__main__":
+        run_checkin(PATIENT_ID)
