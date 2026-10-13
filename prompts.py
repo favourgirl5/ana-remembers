@@ -1,11 +1,11 @@
 """Prompt templates for Ana Remembers.
-
+ 
 Two prompts per check-in:
   1. build_checkin_prompt   -> Ana's opening message to the patient
   2. build_summary_prompt   -> turns the patient's reply into a short record for Sessions
 """
 import json
-
+ 
 ANA_PERSONA = """You are Ana, a warm and calm check-in companion for a patient living with heart failure.
 Rules:
 - Stay positive, steady and kind no matter how the patient responds. Do not mirror
@@ -21,12 +21,12 @@ Rules:
   emergency number. A known symptom that is stable needs no referral.
 - You do not give medical advice, change doses or diagnose.
 - Never invent facts that are not in the context below."""
-
-
+ 
+ 
 def _first_name(full_name):
     return (full_name or "").split()[0] if full_name else "there"
-
-
+ 
+ 
 def _format_list(items, fields, empty="None recorded."):
     if not items:
         return empty
@@ -35,72 +35,91 @@ def _format_list(items, fields, empty="None recorded."):
         parts = [str(item.get(f)) for f in fields if item.get(f) not in (None, "")]
         lines.append("- " + " | ".join(parts))
     return "\n".join(lines)
-
-
+ 
+ 
 def _format_context(ctx):
     p = ctx["patient"]
     return f"""PATIENT
 Name: {_first_name(p.get("FullName"))}
 Allergies: {p.get("Allergies") or "None recorded"}
-
+ 
 DIAGNOSES (name | date | presenting symptoms)
 {_format_list(ctx["diagnoses"], ["DiagnosisName", "DiagnosisDate", "PresentingSymptoms"])}
-
+ 
 MEDICATIONS (name | dosage | frequency | start date)
 {_format_list(ctx["medications"], ["MedicationName", "Dosage", "Frequency", "StartDate"])}
-
+ 
 RECENT CHECK-INS, newest first (date | medication taken | summary)
 {_format_list(ctx["recent_sessions"], ["SessionDate", "MedicationTaken", "ConversationSummary"],
               empty="No earlier check-ins. This is the first one.")}"""
-
-
+ 
+ 
 def build_checkin_prompt(ctx):
     """Prompt for Gemini call 1: Ana's check-in message."""
     return f"""{ANA_PERSONA}
-
+ 
 {_format_context(ctx)}
-
+ 
 TASK
 Write Ana's check-in message for today. Greet the patient by first name, gently ask how
 they are doing and whether they managed to take their medication. If an earlier check-in
 mentioned something specific, you may follow up on it kindly.
 Reply with only the message text."""
+ 
+ 
+def _format_transcript(transcript):
+    return "\n".join(f"{speaker}: {text}" for speaker, text in transcript)
 
 
-def build_summary_prompt(ctx, ana_message, patient_reply):
-    """Prompt for Gemini call 2: summarize the patient's reply for the Sessions table."""
-    meds = ", ".join(m["MedicationName"] for m in ctx["medications"]) or "none recorded"
-    return f"""You summarize a short check-in between Ana (a companion assistant) and a patient.
-The patient's medications: {meds}
+def build_summary_prompt(ctx, transcript, last_turn=False):
+    """Prompt for each patient reply: Ana's next message + a running summary for Sessions.
 
-Ana said: {ana_message}
-Patient replied: {patient_reply}
+    transcript: list of (speaker, text) tuples, e.g. [("Ana", "..."), ("Patient", "...")]
+    """
+    ending = (
+        "This is the LAST message of today's check-in: thank the patient warmly and say goodbye."
+        if last_turn else
+        "If Ana still has a relevant follow-up (from the records, earlier check-ins or what the "
+        "patient just said), ask it. If everything is covered, close warmly and set "
+        "conversation_done to true."
+    )
+    return f"""{ANA_PERSONA}
 
+{_format_context(ctx)}
+
+TODAY'S CHECK-IN SO FAR
+{_format_transcript(transcript)}
+
+TASK
+Write Ana's next message. {ending}
 Return ONLY valid JSON, no extra text, in this exact shape:
-{{"medication_taken": true | false | null, "summary": "<1-2 neutral sentences>"}}
+{{"ana_reply": "<Ana's next message>", "conversation_done": true | false, "medication_taken": true | false | null, "summary": "<1-3 neutral sentences>"}}
 
-- medication_taken: true if they clearly took it, false if they clearly did not,
-  null if the reply does not say.
-- summary: factual and neutral, in third person. Always name every symptom or side effect
-  mentioned and whether it is new, the same, better or worse than before (if the reply
-  says). Include mood and anything worth following up next time. No judgments, no advice."""
+- ana_reply: follows all the rules above (including the symptom rules).
+- conversation_done: true when Ana is saying goodbye, otherwise false.
+- medication_taken: true if they clearly took it today, false if they clearly did not,
+  null if not said yet.
+- summary: covers the WHOLE check-in so far, factual and neutral, in third person. Always
+  name every symptom or side effect mentioned and whether it is new, the same, better or
+  worse than before (if said). Include mood and anything worth following up next time.
+  No judgments, no advice."""
 
 
 def parse_summary_response(text):
-    """Turn Gemini's JSON reply into (medication_taken, summary). Falls back safely."""
+    """Turn Gemini's JSON into a dict. Falls back safely if the JSON is broken."""
     cleaned = text.strip()
-    if cleaned.startswith("```"):
-        cleaned = cleaned.strip("`")
-        cleaned = cleaned[cleaned.find("{"):]
     try:
         data = json.loads(cleaned[cleaned.find("{"): cleaned.rfind("}") + 1])
-        return data.get("medication_taken"), data.get("summary", "").strip()
+        return {
+            "ana_reply": str(data.get("ana_reply", "")).strip(),
+            "conversation_done": bool(data.get("conversation_done", False)),
+            "medication_taken": data.get("medication_taken"),
+            "summary": str(data.get("summary", "")).strip(),
+        }
     except (ValueError, AttributeError):
-        return None, text.strip()
-
-
-if __name__ == "__main__":
-    # Preview the prompt without calling Gemini.
-    from db import get_patient_context
-    ctx = get_patient_context(1)  # change to a PatientID that exists
-    print(build_checkin_prompt(ctx))
+        return {
+            "ana_reply": "Thank you for checking in with me today. Take care!",
+            "conversation_done": True,
+            "medication_taken": None,
+            "summary": cleaned,
+        }
