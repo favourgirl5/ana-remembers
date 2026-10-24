@@ -14,7 +14,7 @@ def ask_gemini(prompt, attempts=4):
         try:
             return get_ai_response(prompt)
         except Exception as e:
-            if attempt == attempts:
+            if attempt == attempts or "429" in str(e):   # quota used up: retrying won't help
                 raise
             wait = 2 ** attempt  # 2, 4, 8 seconds
             print(f"[Gemini busy ({type(e).__name__}), retrying in {wait}s...]")
@@ -39,6 +39,7 @@ def run_checkin(patient_id):
 
     medication_taken = None
     summary = ""
+    unsummarised = []
 
     # 3. Conversation loop: patient replies, Ana answers, until done
     for turn in range(1, MAX_TURNS + 1):
@@ -49,12 +50,18 @@ def run_checkin(patient_id):
             if not patient_reply:
                 break
         transcript.append(("Patient", patient_reply))
+        unsummarised.append(patient_reply)
 
         last_turn = turn == MAX_TURNS or patient_reply.lower().strip(" .!") in EXIT_WORDS
         try:
             raw = ask_gemini(build_summary_prompt(ctx, transcript, last_turn=last_turn))
+        
         except Exception:
-            print("\nAna: Sorry, I'm having trouble connecting right now. Let's talk again a little later.")
+            print("\nAna: Sorry, I'm having trouble connecting right now. I've noted what you "
+                  "told me, so let's talk again a little later.")
+            raw_notes = " / ".join(unsummarised)
+            summary = (summary + " " if summary else "") + \
+                f"[Connection lost, not summarised] Patient said: {raw_notes}"
             break
 
         result = parse_summary_response(raw)
@@ -65,6 +72,7 @@ def run_checkin(patient_id):
             medication_taken = result["medication_taken"]
         if result["summary"]:
             summary = result["summary"]
+        unsummarised.clear()
 
         if last_turn or result["conversation_done"]:
             break

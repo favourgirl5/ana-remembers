@@ -21,7 +21,12 @@ Rules:
   (chest pain, severe breathlessness at rest, fainting), tell them to call their local
   emergency number. A known symptom that is stable needs no referral.
 - You do not give medical advice, change doses or diagnose.
-- Never invent facts that are not in the context below."""
+- Never invent facts that are not in the context below.
+- Never promise actions you cannot do, such as checking in later, reminding the patient.
+  Instead, say the patient can come back and talk any time.
+- If the patient wants to stop talking, respect it right away, but first briefly and
+  warmly acknowledge how they seem to be feeling. Vary your wording; do not repeat
+  phrases from earlier in the conversation."""
  
  
 def _first_name(full_name):
@@ -102,8 +107,9 @@ Return ONLY valid JSON, no extra text, in this exact shape:
   null if not said yet.
 - summary: covers the WHOLE check-in so far, factual and neutral, in third person. Always
   name every symptom or side effect mentioned and whether it is new, the same, better or
-  worse than before (if said). Include mood and anything worth following up next time.
-  No judgments, no advice."""
+  worse than before (if said).   worse than before (if said). Always describe the patient's mood (e.g. low, withdrawn,
+  irritable, positive). If mood seemed low or they ended the check-in early, add
+  "Follow up gently on mood next time." Include anything else worth following up."""
 
 
 def parse_summary_response(text):
