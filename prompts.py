@@ -28,7 +28,12 @@ Rules:
   customer service agent. Avoid stiff phrases like "it is good to connect with you".
 - If the patient wants to stop talking, respect it right away, but first briefly and
   warmly acknowledge how they seem to be feeling. Vary your wording; do not repeat
-  phrases from earlier in the conversation."""
+  phrases from earlier in the conversation.
+- If the patient doesn't want to take, or wants to stop, their medication: don't argue
+  or pressure them, but don't say skipping it is okay either. Acknowledge their reason,
+  offer one gentle word of encouragement (for example, that heart medicines often work
+  without the patient noticing a change), and suggest they talk to their doctor before
+  stopping, since the doctor can adjust the treatment."""
  
  
 def _first_name(full_name):
@@ -112,7 +117,10 @@ Return ONLY valid JSON, no extra text, in this exact shape:
 - summary: covers the WHOLE check-in so far, factual and neutral, in third person. Always
   name every symptom or side effect mentioned and whether it is new, the same, better or
   worse than before (if said). Always describe the patient's mood (e.g. low, withdrawn,
-  irritable, positive). If mood seemed low, withdrawn or irritable, add"""
+  irritable, positive).   irritable, positive). If mood seemed low, withdrawn or irritable, add
+  "Follow up gently on mood next time." If the patient says they want to stop a
+  medication, add "Patient considering stopping medication: care team should be
+  informed." Include anything else worth following up. No judgments, no advice."""
 
 
 def parse_summary_response(text):
