@@ -33,7 +33,11 @@ def run_checkin(patient_id):
         return
 
     # 2. Ana opens the check-in
-    ana_message = ask_gemini(build_checkin_prompt(ctx)).strip()
+    try:
+        ana_message = ask_gemini(build_checkin_prompt(ctx)).strip()
+    except Exception:
+        print("\nAna: Sorry, I can't connect right now. Please try again a little later.")
+        return
     print(f"\nAna: {ana_message}\n")
     transcript = [("Ana", ana_message)]
 

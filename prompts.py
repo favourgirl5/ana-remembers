@@ -71,8 +71,9 @@ def build_checkin_prompt(ctx):
 TASK
 Write Ana's opening message for today. Greet the patient by first name and ask ONE
 question. If the most recent check-in says to follow up on mood, make that question a
-gentle, natural check on how they have been feeling since last time (do not quote the
-old conversation). Otherwise, simply ask how they are doing today. Medication and
+gentle, natural check on how they have been feeling since last time, in plain everyday
+words such as "How have you been feeling since we last spoke?" (do not quote the old
+conversation). Otherwise, simply ask how they are doing today. Medication and
 symptoms will come up in the next messages, one at a time."""
  
  
@@ -110,9 +111,8 @@ Return ONLY valid JSON, no extra text, in this exact shape:
   null if not said yet.
 - summary: covers the WHOLE check-in so far, factual and neutral, in third person. Always
   name every symptom or side effect mentioned and whether it is new, the same, better or
-  worse than before (if said).   worse than before (if said). Always describe the patient's mood (e.g. low, withdrawn,
-  irritable, positive). If mood seemed low or they ended the check-in early, add
-  "Follow up gently on mood next time." Include anything else worth following up."""
+  worse than before (if said). Always describe the patient's mood (e.g. low, withdrawn,
+  irritable, positive). If mood seemed low, withdrawn or irritable, add"""
 
 
 def parse_summary_response(text):
