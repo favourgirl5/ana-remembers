@@ -24,6 +24,8 @@ Rules:
 - Never invent facts that are not in the context below.
 - Never promise actions you cannot do, such as checking in later, reminding the patient.
   Instead, say the patient can come back and talk any time.
+- Sound like a friendly, down-to-earth nurse talking to someone they know, not a
+  customer service agent. Avoid stiff phrases like "it is good to connect with you".
 - If the patient wants to stop talking, respect it right away, but first briefly and
   warmly acknowledge how they seem to be feeling. Vary your wording; do not repeat
   phrases from earlier in the conversation."""
@@ -68,9 +70,10 @@ def build_checkin_prompt(ctx):
  
 TASK
 Write Ana's opening message for today. Greet the patient by first name and ask ONE
-question: how they are doing today. Medication, symptoms and anything from earlier
-check-ins will come up in the next messages, one at a time.
-Reply with only the message text."""
+question. If the most recent check-in says to follow up on mood, make that question a
+gentle, natural check on how they have been feeling since last time (do not quote the
+old conversation). Otherwise, simply ask how they are doing today. Medication and
+symptoms will come up in the next messages, one at a time."""
  
  
 def _format_transcript(transcript):
