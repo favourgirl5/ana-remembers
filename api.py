@@ -1,0 +1,136 @@
+"""FastAPI backend for Ana Remembers.
+
+Lets the React Native front end run check-ins. Python is still the only
+orchestrator between SQL Server and Gemini; the app only talks to this API.
+
+Run:  python -m uvicorn api:app --reload
+Docs: http://127.0.0.1:8000/docs
+"""
+import uuid
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from db import get_patient_context, store_session
+from main import ask_gemini, MAX_TURNS, EXIT_WORDS
+from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_response
+
+app = FastAPI(title="Ana Remembers API")
+
+# Allow the app (Expo in the browser or on a phone) to call this API during development.
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
+
+# Check-ins that are still in progress, kept in memory while the conversation runs.
+# Long-term memory (the Sessions table) is still stored in SQL Server.
+CHECKINS = {}
+
+CONNECTION_LOST_MESSAGE = (
+    "Sorry, I'm having trouble connecting right now. I've noted what you told me, "
+    "so let's talk again a little later."
+)
+
+
+class StartRequest(BaseModel):
+    patient_id: int
+
+
+class ReplyRequest(BaseModel):
+    message: str
+
+
+def _save_checkin(checkin_id):
+    """End a check-in and store it in Sessions. Returns the SessionID or None."""
+    c = CHECKINS.pop(checkin_id, None)
+    if c is None:
+        return None
+    summary = c["summary"]
+    if c["unsummarised"]:  # replies Gemini never processed (connection lost)
+        raw_notes = " / ".join(c["unsummarised"])
+        summary = (summary + " " if summary else "") + \
+            f"[Connection lost, not summarised] Patient said: {raw_notes}"
+    if not summary:
+        return None
+    return store_session(c["patient_id"], c["medication_taken"], summary)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/patients/{patient_id}")
+def patient_context(patient_id: int):
+    """What Ana knows about a patient. No Gemini call, so it costs no requests."""
+    ctx = get_patient_context(patient_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return ctx
+
+
+@app.post("/checkins/start")
+def start_checkin(req: StartRequest):
+    """Load the patient's memory and return Ana's opening message."""
+    ctx = get_patient_context(req.patient_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    try:
+        ana_message = ask_gemini(build_checkin_prompt(ctx)).strip()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Ana can't connect right now. Please try again later.")
+
+    checkin_id = str(uuid.uuid4())
+    CHECKINS[checkin_id] = {
+        "patient_id": req.patient_id,
+        "ctx": ctx,
+        "transcript": [("Ana", ana_message)],
+        "turns": 0,
+        "medication_taken": None,
+        "summary": "",
+        "unsummarised": [],
+    }
+    return {"checkin_id": checkin_id, "ana_message": ana_message}
+
+
+@app.post("/checkins/{checkin_id}/reply")
+def reply(checkin_id: str, req: ReplyRequest):
+    """Send the patient's message; get Ana's reply. Saves the session when it ends."""
+    c = CHECKINS.get(checkin_id)
+    if c is None:
+        raise HTTPException(status_code=404, detail="Check-in not found or already ended")
+    text = req.message.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Message is empty")
+
+    c["transcript"].append(("Patient", text))
+    c["unsummarised"].append(text)
+    c["turns"] += 1
+    last_turn = c["turns"] >= MAX_TURNS or text.lower().strip(" .!") in EXIT_WORDS
+
+    try:
+        raw = ask_gemini(build_summary_prompt(c["ctx"], c["transcript"], last_turn=last_turn))
+    except Exception:
+        session_id = _save_checkin(checkin_id)
+        return {"ana_reply": CONNECTION_LOST_MESSAGE, "done": True, "session_id": session_id}
+
+    result = parse_summary_response(raw)
+    c["transcript"].append(("Ana", result["ana_reply"]))
+    if result["medication_taken"] is not None:
+        c["medication_taken"] = result["medication_taken"]
+    if result["summary"]:
+        c["summary"] = result["summary"]
+    c["unsummarised"].clear()
+
+    done = last_turn or result["conversation_done"]
+    session_id = _save_checkin(checkin_id) if done else None
+    return {"ana_reply": result["ana_reply"], "done": done, "session_id": session_id}
+
+
+@app.post("/checkins/{checkin_id}/end")
+def end_checkin(checkin_id: str):
+    """Patient closes the chat early: save what we have. No Gemini call."""
+    if checkin_id not in CHECKINS:
+        raise HTTPException(status_code=404, detail="Check-in not found or already ended")
+    return {"session_id": _save_checkin(checkin_id)}
