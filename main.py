@@ -1,5 +1,6 @@
 """Run one Ana Remembers check-in in the terminal."""
 import time
+import json
  
 from db import get_patient_context, store_session
 from gemini_client import get_ai_response
@@ -86,9 +87,16 @@ def run_checkin(patient_id):
     if not summary:
         print("Nothing to save from this check-in.")
         return
-    session_id = store_session(patient_id, medication_taken, summary)
-    print(f"[Saved session {session_id}] medication_taken={medication_taken}")
-    print(f"[Summary] {summary}")
+    try:
+       session_id = store_session(patient_id, medication_taken, summary)
+       print(f"[Saved session {session_id}] medication_taken={medication_taken}")
+    except Exception as e:
+       backup = {"patient_id": patient_id, "medication_taken": medication_taken,
+                "summary": summary, "time": time.strftime("%Y-%m-%d %H:%M:%S")}
+       with open("unsaved_sessions.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(backup) + "\n")
+       print(f"[Database unavailable: session kept in unsaved_sessions.jsonl] {str(e)[:80]}")
+       print(f"[Summary] {summary}")
 
 if __name__ == "__main__":
         run_checkin(PATIENT_ID)

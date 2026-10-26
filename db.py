@@ -10,7 +10,7 @@ CONN_STR = (
 
 
 def get_connection():
-    return pyodbc.connect(CONN_STR)
+    return pyodbc.connect(CONN_STR, timeout=30)
 
 
 def _rows_to_dicts(cursor):
