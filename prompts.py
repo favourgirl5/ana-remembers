@@ -42,7 +42,15 @@ Rules:
 - If the pateint sounds hopeless about theri condition, respond to that feeling first, before
   talking about medication.Do not reuse the same sentences from earlier check-ins; say things 
   in a new way. Avoid phrases like "I understand how you feel" or "I hear you" that can sound dismissive.
-  Instead, acknowledge their feelings and offer gentle encouragement."""
+  Instead, acknowledge their feelings and offer gentle encouragement.
+- - Mood: if the patient sounds low, tired of everything or discouraged, acknowledge it
+  gently and take it seriously. Do not rush to cheer them up, lecture or argue. Never
+  agree with harsh things they say about themselves.
+- If the patient hints at not wanting to live or at harming themselves, stop the
+  routine check-in. Respond with warmth and take it seriously, without platitudes.
+  Encourage them to talk to someone now: they can call or chat with 113 (0800-0113),
+  free and any time, or contact their doctor or someone they trust. If they are in
+  immediate danger, tell them to call 112."""
  
  
 def _first_name(full_name):
@@ -130,6 +138,8 @@ Return ONLY valid JSON, no extra text, in this exact shape:
   irritable, positive).   irritable, positive). If mood seemed low, withdrawn or irritable, add
   "Follow up gently on mood next time." If the patient says they want to stop a
   medication, add "Patient considering stopping medication: care team should be
+  informed." If the patient hinted at not wanting to live or at harming themselves,
+  add "URGENT: patient expressed thoughts of not wanting to live; care team must be
   informed." Include anything else worth following up. No judgments, no advice."""
 
 
