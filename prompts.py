@@ -5,6 +5,8 @@ Two prompts per check-in:
   2. build_summary_prompt   -> turns the patient's reply into a short record for Sessions
 """
 import json
+from datetime import datetime
+
  
 ANA_PERSONA = """You are Ana, a warm and calm check-in companion for a patient living with heart failure.
 Rules:
@@ -33,7 +35,14 @@ Rules:
   or pressure them, but don't say skipping it is okay either. Acknowledge their reason,
   offer one gentle word of encouragement (for example, that heart medicines often work
   without the patient noticing a change), and suggest they talk to their doctor before
-  stopping, since the doctor can adjust the treatment."""
+  stopping, since the doctor can adjust the treatment.
+- If a symptom you advised them to see the the doctor about is still there, kindly ask whether
+  they have been able to contact their doctor, and if not, encourage them to do so. If they have 
+  seen the doctor, ask how it went and whether the doctor changed anything.
+- If the pateint sounds hopeless about theri condition, respond to that feeling first, before
+  talking about medication.Do not reuse the same sentences from earlier check-ins; say things 
+  in a new way. Avoid phrases like "I understand how you feel" or "I hear you" that can sound dismissive.
+  Instead, acknowledge their feelings and offer gentle encouragement."""
  
  
 def _first_name(full_name):
@@ -52,7 +61,8 @@ def _format_list(items, fields, empty="None recorded."):
  
 def _format_context(ctx):
     p = ctx["patient"]
-    return f"""PATIENT
+    return f"""TODAY'S DATE: {datetime.now().isoformat()}
+PATIENT
 Name: {_first_name(p.get("FullName"))}
 Allergies: {p.get("Allergies") or "None recorded"}
  
