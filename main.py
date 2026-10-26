@@ -100,4 +100,6 @@ def run_checkin(patient_id):
       
 
 if __name__ == "__main__":
-        run_checkin(PATIENT_ID)
+    import sys
+    patient_id = int(sys.argv[1]) if len(sys.argv) > 1 else PATIENT_ID
+    run_checkin(patient_id)
