@@ -8,7 +8,7 @@ from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_re
 PATIENT_ID = 1  # change to a PatientID that exists
  
  
-def ask_gemini(prompt, attempts=4):
+def ask_gemini(prompt, attempts=2):
     """Call Gemini, waiting and retrying if the model is busy (e.g. 503 errors)."""
     for attempt in range(1, attempts + 1):
         try:
@@ -35,8 +35,9 @@ def run_checkin(patient_id):
     # 2. Ana opens the check-in
     try:
         ana_message = ask_gemini(build_checkin_prompt(ctx)).strip()
-    except Exception:
+    except Exception as e:
         print("\nAna: Sorry, I can't connect right now. Please try again a little later.")
+        print(f"[Debug] {str(e)[:120]}")
         return
     print(f"\nAna: {ana_message}\n")
     transcript = [("Ana", ana_message)]
