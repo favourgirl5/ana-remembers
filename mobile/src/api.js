@@ -34,3 +34,5 @@ export const sendReply = (checkinId, message) =>
 
 export const endCheckin = (checkinId) =>
   request(`/checkins/${checkinId}/end`, { method: 'POST' });
+
+export const getProgress = (patientId) => request(`/patients/${patientId}/progress`);

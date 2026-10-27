@@ -6,13 +6,15 @@ orchestrator between SQL Server and Gemini; the app only talks to this API.
 Run:  python -m uvicorn api:app --reload
 Docs: http://127.0.0.1:8000/docs
 """
+
 import uuid
+from datetime import date, timedelta
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from db import get_patient_context, store_session
+from db import get_patient_context, get_session_dates, store_session
 from main import ask_gemini, MAX_TURNS, EXIT_WORDS
 from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_response
 
@@ -68,6 +70,36 @@ def patient_context(patient_id: int):
     if ctx is None:
         raise HTTPException(status_code=404, detail="Patient not found")
     return ctx
+
+@app.get("/patients/{patient_id}/progress")
+def progress(patient_id: int):
+    """Streak, this week's check-ins and medications. No Gemini call."""
+    ctx = get_patient_context(patient_id)
+    if ctx is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    days = {date.fromisoformat(d) for d in get_session_dates(patient_id)}
+    today = date.today()
+
+    # Streak: days in a row with a check-in, ending today (or yesterday if not checked in yet today)
+    day = today if today in days else today - timedelta(days=1)
+    streak = 0
+    while day in days:
+        streak += 1
+        day -= timedelta(days=1)
+
+    monday = today - timedelta(days=today.weekday())
+    week = []
+    for i in range(7):
+        d = monday + timedelta(days=i)
+        week.append({"date": d.isoformat(), "checked_in": d in days,
+                     "is_today": d == today, "is_future": d > today})
+
+    return {
+        "streak_days": streak,
+        "week": week,
+        "checkins_this_week": sum(w["checked_in"] for w in week),
+        "medications": ctx["medications"],
+    }
 
 
 @app.post("/checkins/start")

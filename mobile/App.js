@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import AnaAvatar from './src/AnaAvatar';
 import CheckInScreen from './src/CheckInScreen';
+import ProgressScreen from './src/ProgressScreen';
 import { getPatient } from './src/api';
 import { PATIENT_ID } from './src/config';
 import { colors, serif } from './src/theme';
@@ -80,12 +81,7 @@ export default function App() {
               <View style={[styles.flex, tab !== 'checkin' && styles.hidden]}>
                 <CheckInScreen patient={patient} />
               </View>
-              {tab === 'progress' && (
-                <View style={styles.center}>
-                  <Text style={styles.comingTitle}>Your progress</Text>
-                  <Text style={styles.comingText}>Coming soon.</Text>
-                </View>
-              )}
+                           {tab === 'progress' && <ProgressScreen patientId={patient.patient.PatientID} />}
             </>
           )}
         </View>

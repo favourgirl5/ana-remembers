@@ -140,7 +140,13 @@ Return ONLY valid JSON, no extra text, in this exact shape:
   medication, add "Patient considering stopping medication: care team should be
   informed." If the patient hinted at not wanting to live or at harming themselves,
   add "URGENT: patient expressed thoughts of not wanting to live; care team must be
-  informed." Include anything else worth following up. No judgments, no advice."""
+  informed." Include anything else worth following up. No judgments, no advice.
+- If the patient asks what one of their medications is for, explain it in plain,
+  everyday words: what it does for their heart and how that helps them (for example,
+  a "water pill" that removes extra fluid, so there is less swelling and breathlessness).
+  Only talk about medications on their list. Do not give doses, suggest changes or
+  advise on other medicines; for detailed questions (side effects, interactions, doses)
+  suggest their pharmacist or doctor. If you are not sure, say so honestly."""
 
 
 def parse_summary_response(text):

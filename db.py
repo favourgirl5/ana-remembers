@@ -109,3 +109,18 @@ def store_session(patient_id, medication_taken, summary):
         return new_id
     finally:
         conn.close()
+        
+def get_session_dates(patient_id, days=60):
+    """Dates (YYYY-MM-DD) on which the patient had a check-in, newest first."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT DISTINCT CAST(SessionDate AS DATE) AS Day FROM Sessions "
+            "WHERE PatientID = ? AND SessionDate >= DATEADD(DAY, ?, CAST(GETDATE() AS DATE)) "
+            "ORDER BY Day DESC",
+            patient_id, -days,
+        )
+        return [row[0].isoformat() for row in cur.fetchall()]
+    finally:
+        conn.close()
