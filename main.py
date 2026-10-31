@@ -22,7 +22,7 @@ def ask_gemini(prompt, attempts=2):
             time.sleep(wait)
  
  
-MAX_TURNS = 5                      # patient replies per check-in
+MAX_TURNS = 10                      # patient replies per check-in
 EXIT_WORDS = {"bye", "goodbye", "exit", "quit", "stop"}
 
 
