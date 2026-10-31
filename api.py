@@ -2,19 +2,21 @@
 
 Lets the React Native front end run check-ins. Python is still the only
 orchestrator between SQL Server and Gemini; the app only talks to this API.
+Every patient endpoint requires a login token, and a patient can only reach
+their own data (NFR6).
 
 Run:  python -m uvicorn api:app --reload
 Docs: http://127.0.0.1:8000/docs
 """
-
 import uuid
 from datetime import date, timedelta
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from db import get_patient_context, get_session_dates, store_session
+from auth import check_password, make_token, read_token
+from db import get_login, get_patient_context, get_session_dates, store_session
 from main import ask_gemini, MAX_TURNS, EXIT_WORDS
 from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_response
 
@@ -35,6 +37,11 @@ CONNECTION_LOST_MESSAGE = (
 )
 
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
 class StartRequest(BaseModel):
     patient_id: int
 
@@ -42,6 +49,37 @@ class StartRequest(BaseModel):
 class ReplyRequest(BaseModel):
     message: str
 
+
+# ---------- Login ----------
+
+def current_patient(authorization: str = Header(default="")) -> int:
+    """Reads the login token from the 'Authorization: Bearer <token>' header."""
+    patient_id = read_token(authorization.removeprefix("Bearer ").strip())
+    if patient_id is None:
+        raise HTTPException(status_code=401, detail="Please log in again.")
+    return patient_id
+
+
+def _only_own(patient_id: int, me: int):
+    if patient_id != me:
+        raise HTTPException(status_code=403, detail="You can only view your own information.")
+
+
+@app.post("/auth/login")
+def login(req: LoginRequest):
+    user = get_login(req.email.strip())
+    # Same message for unknown email and wrong password, so it doesn't reveal which emails exist.
+    if user is None or not check_password(req.password, user["PasswordHash"]):
+        raise HTTPException(status_code=401, detail="Email or password is incorrect.")
+    return {
+        "token": make_token(user["PatientID"]),
+        "patient_id": user["PatientID"],
+        "full_name": user["FullName"],
+        "email": user["Email"],
+    }
+
+
+# ---------- Helpers ----------
 
 def _save_checkin(checkin_id):
     """End a check-in and store it in Sessions. Returns the SessionID or None."""
@@ -58,22 +96,34 @@ def _save_checkin(checkin_id):
     return store_session(c["patient_id"], c["medication_taken"], summary)
 
 
+def _own_checkin(checkin_id, me):
+    c = CHECKINS.get(checkin_id)
+    if c is None or c["patient_id"] != me:
+        raise HTTPException(status_code=404, detail="Check-in not found or already ended")
+    return c
+
+
+# ---------- Endpoints ----------
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
 @app.get("/patients/{patient_id}")
-def patient_context(patient_id: int):
+def patient_context(patient_id: int, me: int = Depends(current_patient)):
     """What Ana knows about a patient. No Gemini call, so it costs no requests."""
+    _only_own(patient_id, me)
     ctx = get_patient_context(patient_id)
     if ctx is None:
         raise HTTPException(status_code=404, detail="Patient not found")
     return ctx
 
+
 @app.get("/patients/{patient_id}/progress")
-def progress(patient_id: int):
+def progress(patient_id: int, me: int = Depends(current_patient)):
     """Streak, this week's check-ins and medications. No Gemini call."""
+    _only_own(patient_id, me)
     ctx = get_patient_context(patient_id)
     if ctx is None:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -103,8 +153,9 @@ def progress(patient_id: int):
 
 
 @app.post("/checkins/start")
-def start_checkin(req: StartRequest):
+def start_checkin(req: StartRequest, me: int = Depends(current_patient)):
     """Load the patient's memory and return Ana's opening message."""
+    _only_own(req.patient_id, me)
     ctx = get_patient_context(req.patient_id)
     if ctx is None:
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -127,11 +178,9 @@ def start_checkin(req: StartRequest):
 
 
 @app.post("/checkins/{checkin_id}/reply")
-def reply(checkin_id: str, req: ReplyRequest):
+def reply(checkin_id: str, req: ReplyRequest, me: int = Depends(current_patient)):
     """Send the patient's message; get Ana's reply. Saves the session when it ends."""
-    c = CHECKINS.get(checkin_id)
-    if c is None:
-        raise HTTPException(status_code=404, detail="Check-in not found or already ended")
+    c = _own_checkin(checkin_id, me)
     text = req.message.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Message is empty")
@@ -161,8 +210,7 @@ def reply(checkin_id: str, req: ReplyRequest):
 
 
 @app.post("/checkins/{checkin_id}/end")
-def end_checkin(checkin_id: str):
+def end_checkin(checkin_id: str, me: int = Depends(current_patient)):
     """Patient closes the chat early: save what we have. No Gemini call."""
-    if checkin_id not in CHECKINS:
-        raise HTTPException(status_code=404, detail="Check-in not found or already ended")
+    _own_checkin(checkin_id, me)
     return {"session_id": _save_checkin(checkin_id)}

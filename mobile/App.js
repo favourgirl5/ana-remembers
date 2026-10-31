@@ -11,27 +11,57 @@ import {
 } from 'react-native';
 import AnaAvatar from './src/AnaAvatar';
 import CheckInScreen from './src/CheckInScreen';
+import LoginScreen from './src/LoginScreen';
 import ProgressScreen from './src/ProgressScreen';
 import SettingsScreen from './src/SettingsScreen';
-import { getPatient } from './src/api';
-import { PATIENT_ID } from './src/config';
+import { getPatient, setAuthToken, setUnauthorizedHandler } from './src/api';
+import { stopSpeaking } from './src/speech';
 import { colors, serif } from './src/theme';
 
 export default function App() {
+  const [auth, setAuth] = useState(null); // { token, patientId, fullName, email } after login
+  const [notice, setNotice] = useState(''); // message shown on the login screen
   const [tab, setTab] = useState('checkin'); // checkin | progress | settings
   const [patient, setPatient] = useState(null);
   const [error, setError] = useState('');
   const [settings, setSettings] = useState({ voiceOn: false, handsFree: false });
 
-  // Loads Ana's memory of the patient. Costs no Gemini requests.
-  function loadPatient() {
+  function handleLogin(data) {
+    setAuthToken(data.token);
+    setNotice('');
+    setAuth({
+      token: data.token,
+      patientId: data.patient_id,
+      fullName: data.full_name,
+      email: data.email,
+    });
+  }
+
+  function handleLogout(message = '') {
+    stopSpeaking();
+    setAuthToken(null);
+    setAuth(null);
+    setPatient(null);
     setError('');
-    getPatient(PATIENT_ID)
+    setTab('checkin');
+    setNotice(message);
+  }
+
+  // If the API says the login has expired, go back to the login screen.
+  useEffect(() => {
+    setUnauthorizedHandler(() => handleLogout('Your session has ended. Please log in again.'));
+  }, []);
+
+  // Loads Ana's memory of the logged-in patient. Costs no Gemini requests.
+  function loadPatient() {
+    if (!auth) return;
+    setError('');
+    getPatient(auth.patientId)
       .then(setPatient)
       .catch((e) => setError(e.message));
   }
 
-  useEffect(loadPatient, []);
+  useEffect(loadPatient, [auth]);
 
   const initials = (patient?.patient.FullName ?? '')
     .split(' ')
@@ -45,62 +75,70 @@ export default function App() {
       <View style={styles.phone}>
         <StatusBar style="dark" />
 
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <AnaAvatar size={36} />
-            <View>
-              <Text style={styles.headerName}>Ana</Text>
-              <View style={styles.onlineRow}>
-                <View style={styles.onlineDot} />
-                <Text style={styles.onlineText}>Here with you</Text>
+        {!auth ? (
+          <LoginScreen onLogin={handleLogin} notice={notice} />
+        ) : (
+          <>
+            {/* Header */}
+            <View style={styles.header}>
+              <View style={styles.headerLeft}>
+                <AnaAvatar size={36} />
+                <View>
+                  <Text style={styles.headerName}>Ana</Text>
+                  <View style={styles.onlineRow}>
+                    <View style={styles.onlineDot} />
+                    <Text style={styles.onlineText}>Here with you</Text>
+                  </View>
+                </View>
               </View>
+              {initials ? (
+                <Pressable style={styles.initials} onPress={() => setTab('settings')}>
+                  <Text style={styles.initialsText}>{initials}</Text>
+                </Pressable>
+              ) : null}
             </View>
-          </View>
-          {initials ? (
-            <View style={styles.initials}>
-              <Text style={styles.initialsText}>{initials}</Text>
-            </View>
-          ) : null}
-        </View>
 
-        {/* Screens */}
-        <View style={styles.flex}>
-          {error ? (
-            <View style={styles.center}>
-              <Text style={styles.errorText}>{error}</Text>
-              <Pressable style={styles.retryButton} onPress={loadPatient}>
-                <Text style={styles.retryText}>Try again</Text>
-              </Pressable>
-            </View>
-          ) : !patient ? (
-            <View style={styles.center}>
-              <ActivityIndicator color={colors.primary} />
-            </View>
-          ) : (
-            <>
-              {/* Kept mounted so the conversation survives switching tabs */}
-              <View style={[styles.flex, tab !== 'checkin' && styles.hidden]}>
-                <CheckInScreen patient={patient} settings={settings} />
-              </View>
-              {tab === 'progress' && <ProgressScreen patientId={patient.patient.PatientID} />}
-              {tab === 'settings' && (
-                <SettingsScreen
-                  settings={settings}
-                  onChange={setSettings}
-                  firstName={patient.patient.FullName?.split(' ')[0]}
-                />
+            {/* Screens */}
+            <View style={styles.flex}>
+              {error ? (
+                <View style={styles.center}>
+                  <Text style={styles.errorText}>{error}</Text>
+                  <Pressable style={styles.retryButton} onPress={loadPatient}>
+                    <Text style={styles.retryText}>Try again</Text>
+                  </Pressable>
+                </View>
+              ) : !patient ? (
+                <View style={styles.center}>
+                  <ActivityIndicator color={colors.primary} />
+                </View>
+              ) : (
+                <>
+                  {/* Kept mounted so the conversation survives switching tabs.
+                      The key resets it when a different patient logs in. */}
+                  <View style={[styles.flex, tab !== 'checkin' && styles.hidden]}>
+                    <CheckInScreen key={auth.patientId} patient={patient} settings={settings} />
+                  </View>
+                  {tab === 'progress' && <ProgressScreen patientId={auth.patientId} />}
+                  {tab === 'settings' && (
+                    <SettingsScreen
+                      settings={settings}
+                      onChange={setSettings}
+                      profile={{ fullName: auth.fullName, email: auth.email, initials }}
+                      onLogout={() => handleLogout()}
+                    />
+                  )}
+                </>
               )}
-            </>
-          )}
-        </View>
+            </View>
 
-        {/* Bottom tabs */}
-        <View style={styles.tabBar}>
-          <TabButton label="Check-in" active={tab === 'checkin'} onPress={() => setTab('checkin')} />
-          <TabButton label="My progress" active={tab === 'progress'} onPress={() => setTab('progress')} />
-          <TabButton label="Settings" active={tab === 'settings'} onPress={() => setTab('settings')} />
-        </View>
+            {/* Bottom tabs */}
+            <View style={styles.tabBar}>
+              <TabButton label="Check-in" active={tab === 'checkin'} onPress={() => setTab('checkin')} />
+              <TabButton label="My progress" active={tab === 'progress'} onPress={() => setTab('progress')} />
+              <TabButton label="Settings" active={tab === 'settings'} onPress={() => setTab('settings')} />
+            </View>
+          </>
+        )}
       </View>
     </View>
   );

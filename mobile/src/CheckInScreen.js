@@ -16,7 +16,8 @@ import { isListeningSupported, speak, startListening, stopSpeaking } from './spe
 import { colors, serif } from './theme';
 
 const QUICK_REPLIES = ['Yes, all done', 'Not yet', 'I forgot'];
-const MEDICATION_WORDS = /medic|pill|tablet|dose/i;
+// Only a question about TAKING medication gets the quick-reply buttons.
+const MEDICATION_QUESTION = /(take|taken|took|had)\b[^?]*\b(medic|pill|tablet|dose)[^?]*\?/i;
 const SHOW_MEDS_AFTER = ['Not yet', 'I forgot'];
 
 function greetingFor(date) {
@@ -113,8 +114,9 @@ export default function CheckInScreen({ patient, settings }) {
   const showQuickReplies =
     status === 'chatting' &&
     !busy &&
+    !listening &&
     lastMessage?.from === 'ana' &&
-    MEDICATION_WORDS.test(lastMessage.text);
+    MEDICATION_QUESTION.test(lastMessage.text);
 
   // Starting costs one Gemini request, so it waits for a tap instead of running on every reload.
   async function handleStart() {

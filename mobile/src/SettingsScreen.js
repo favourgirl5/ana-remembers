@@ -1,12 +1,10 @@
-import * as Speech from 'expo-speech';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { isListeningSupported } from './speech';
+import { isListeningSupported, speak } from './speech';
 import { colors, serif } from './theme';
 
-const VOICE_OPTIONS = { language: 'en-GB', rate: 0.95 };
-
-export default function SettingsScreen({ settings, onChange, firstName }) {
+export default function SettingsScreen({ settings, onChange, profile, onLogout }) {
   const canListen = isListeningSupported();
+  const firstName = profile?.fullName?.split(' ')[0];
 
   function toggle(key) {
     onChange({ ...settings, [key]: !settings[key] });
@@ -14,18 +12,49 @@ export default function SettingsScreen({ settings, onChange, firstName }) {
 
   // Plays a sample on the device/browser itself. Costs no Gemini requests.
   function testVoice() {
-    Speech.stop();
-    Speech.speak(
-      `Hi ${firstName || 'there'}, this is how I will sound when I read my messages to you.`,
-      VOICE_OPTIONS
-    );
+    speak(`Hi ${firstName || 'there'}, this is how I will sound when I read my messages to you.`);
   }
 
   return (
     <ScrollView contentContainerStyle={styles.content}>
       <Text style={styles.label}>SETTINGS</Text>
-      <Text style={styles.heading}>How would you like to talk with Ana?</Text>
+      <Text style={styles.heading}>Your account and preferences</Text>
 
+      {/* Profile */}
+      <Text style={styles.section}>Profile</Text>
+      <View style={styles.card}>
+        <View style={styles.profileRow}>
+          <View style={styles.initials}>
+            <Text style={styles.initialsText}>{profile?.initials}</Text>
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.rowTitle}>{profile?.fullName}</Text>
+            <Text style={styles.rowDescription}>{profile?.email}</Text>
+          </View>
+        </View>
+        <Pressable
+          style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed]}
+          onPress={onLogout}
+        >
+          <Text style={styles.logoutText}>Log out</Text>
+        </Pressable>
+      </View>
+
+      {/* Medical records */}
+      <Text style={styles.section}>Medical records</Text>
+      <View style={[styles.card, styles.disabled]}>
+        <View style={styles.titleRow}>
+          <Text style={styles.rowTitle}>Upload a medical report</Text>
+          <Text style={styles.badge}>Coming next</Text>
+        </View>
+        <Text style={styles.rowDescription}>
+          Add a PDF or photo of a report from your doctor or hospital. Ana will show you what she
+          found, so you can check it before anything is saved.
+        </Text>
+      </View>
+
+      {/* Talking with Ana */}
+      <Text style={styles.section}>Talking with Ana</Text>
       <View style={styles.card}>
         <SettingRow
           title="Ana speaks out loud"
@@ -85,7 +114,8 @@ const styles = StyleSheet.create({
   content: { padding: 20, paddingBottom: 32 },
 
   label: { fontSize: 11, fontWeight: '700', letterSpacing: 1, color: colors.primary, marginTop: 8 },
-  heading: { fontFamily: serif, fontSize: 26, color: colors.text, marginTop: 6, marginBottom: 20 },
+  heading: { fontFamily: serif, fontSize: 26, color: colors.text, marginTop: 6, marginBottom: 16 },
+  section: { fontSize: 13, fontWeight: '700', color: colors.muted, marginBottom: 8, marginTop: 4 },
 
   card: {
     backgroundColor: colors.card,
@@ -112,6 +142,27 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
   },
+
+  profileRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  initials: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  initialsText: { fontSize: 15, fontWeight: '700', color: colors.primary },
+  logoutButton: {
+    marginTop: 14,
+    alignSelf: 'flex-start',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  logoutText: { color: colors.error, fontWeight: '600', fontSize: 14 },
 
   testButton: {
     marginTop: 14,

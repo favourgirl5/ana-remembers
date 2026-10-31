@@ -124,3 +124,30 @@ def get_session_dates(patient_id, days=60):
         return [row[0].isoformat() for row in cur.fetchall()]
     finally:
         conn.close()
+
+def get_login(email):
+       """Login details for one patient. Only used to check passwords; never sent to Gemini."""
+       conn = get_connection()
+       try:
+           cur = conn.cursor()
+           cur.execute(
+               "SELECT PatientID, FullName, Email, PasswordHash FROM Patients WHERE Email = ?",
+               email,
+           )
+           rows = _rows_to_dicts(cur)
+           return rows[0] if rows else None
+       finally:
+           conn.close()
+
+
+def set_password_hash(patient_id, password_hash):
+       conn = get_connection()
+       try:
+           cur = conn.cursor()
+           cur.execute(
+               "UPDATE Patients SET PasswordHash = ? WHERE PatientID = ?",
+               password_hash, patient_id,
+           )
+           conn.commit()
+       finally:
+           conn.close()
