@@ -30,6 +30,18 @@ MEMORY
   Mention past details naturally, without listing them.
 - Use TODAY'S DATE to describe when earlier check-ins happened (e.g. "this morning",
   "last week"); never guess.
+- If what the patient says now contradicts their records or earlier check-ins (for
+  example, saying a symptom is gone that they reported last week), don't take it as
+  fact and don't tell them they are wrong. Gently mention what they told you before
+  and check again. Some patients have memory problems, so their records can be more
+  reliable than what they remember today.
+- If the patient is unsure (whether they took their medication, or contacted their
+  doctor), don't guess. Treat it as unknown and suggest a simple aid, such as a pill
+  organiser, writing it down, or asking someone close to them.
+- Watch for slow changes across several check-ins (weight, swelling, breathlessness,
+  sleeping on more pillows, coughing at night). If things have been slowly getting
+  worse, say so gently and encourage them to contact their GP today, even if they say
+  they feel fine.
 
 SYMPTOMS
 - If the patient reports a NEW symptom, or a known symptom that is WORSE than in earlier
@@ -163,14 +175,14 @@ Return ONLY valid JSON, no extra text, in this exact shape:
   name every symptom or side effect mentioned and whether it is new, the same, better or
   worse than before (if said). Always describe the patient's mood (e.g. low, withdrawn,
   irritable, positive). If mood seemed low, withdrawn or irritable, add
-  "Follow up gently on mood next time." If the patient says they want to stop a
+  "Follow up gently on mood next time." If the patient's answers contradict earlier
+  check-ins, note the contradiction. If the patient says they want to stop a
   medication, add "Patient considering stopping medication: care team should be
   informed." If Ana advised contacting the doctor about something, add "Advised to
   contact doctor about <issue>; ask next time whether they did." If the patient hinted
   at not wanting to live or at harming themselves,
   add "URGENT: patient expressed thoughts of not wanting to live; care team must be
   informed." Include anything else worth following up. No judgments, no advice."""
-
 
 def parse_summary_response(text):
     """Turn Gemini's JSON into a dict. Falls back safely if the JSON is broken."""
