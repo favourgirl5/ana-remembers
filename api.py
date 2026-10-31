@@ -31,12 +31,6 @@ app.add_middleware(
 # Long-term memory (the Sessions table) is still stored in SQL Server.
 CHECKINS = {}
 
-CONNECTION_LOST_MESSAGE = (
-    "Sorry, I'm having trouble connecting right now. I've noted what you told me, "
-    "so let's talk again a little later."
-)
-
-
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -94,6 +88,32 @@ def _save_checkin(checkin_id):
     if not summary:
         return None
     return store_session(c["patient_id"], c["medication_taken"], summary)
+
+
+def _ana_turn(checkin_id, c):
+    """Ask Gemini for Ana's next message about the conversation so far.
+    If Gemini can't be reached, the check-in stays open so the patient can retry."""
+    last_message = c["transcript"][-1][1]
+    last_turn = c["turns"] >= MAX_TURNS or last_message.lower().strip(" .!") in EXIT_WORDS
+    try:
+        raw = ask_gemini(build_summary_prompt(c["ctx"], c["transcript"], last_turn=last_turn))
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Ana couldn't reach her server. Your message is safe; you can try again.",
+        )
+
+    result = parse_summary_response(raw)
+    c["transcript"].append(("Ana", result["ana_reply"]))
+    if result["medication_taken"] is not None:
+        c["medication_taken"] = result["medication_taken"]
+    if result["summary"]:
+        c["summary"] = result["summary"]
+    c["unsummarised"].clear()
+
+    done = last_turn or result["conversation_done"]
+    session_id = _save_checkin(checkin_id) if done else None
+    return {"ana_reply": result["ana_reply"], "done": done, "session_id": session_id}
 
 
 def _own_checkin(checkin_id, me):
@@ -181,6 +201,8 @@ def start_checkin(req: StartRequest, me: int = Depends(current_patient)):
 def reply(checkin_id: str, req: ReplyRequest, me: int = Depends(current_patient)):
     """Send the patient's message; get Ana's reply. Saves the session when it ends."""
     c = _own_checkin(checkin_id, me)
+    if c["transcript"][-1][0] == "Patient":
+        raise HTTPException(status_code=409, detail="Ana hasn't answered your last message yet. Try again first.")
     text = req.message.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Message is empty")
@@ -188,25 +210,16 @@ def reply(checkin_id: str, req: ReplyRequest, me: int = Depends(current_patient)
     c["transcript"].append(("Patient", text))
     c["unsummarised"].append(text)
     c["turns"] += 1
-    last_turn = c["turns"] >= MAX_TURNS or text.lower().strip(" .!") in EXIT_WORDS
+    return _ana_turn(checkin_id, c)
 
-    try:
-        raw = ask_gemini(build_summary_prompt(c["ctx"], c["transcript"], last_turn=last_turn))
-    except Exception:
-        session_id = _save_checkin(checkin_id)
-        return {"ana_reply": CONNECTION_LOST_MESSAGE, "done": True, "session_id": session_id}
 
-    result = parse_summary_response(raw)
-    c["transcript"].append(("Ana", result["ana_reply"]))
-    if result["medication_taken"] is not None:
-        c["medication_taken"] = result["medication_taken"]
-    if result["summary"]:
-        c["summary"] = result["summary"]
-    c["unsummarised"].clear()
-
-    done = last_turn or result["conversation_done"]
-    session_id = _save_checkin(checkin_id) if done else None
-    return {"ana_reply": result["ana_reply"], "done": done, "session_id": session_id}
+@app.post("/checkins/{checkin_id}/retry")
+def retry(checkin_id: str, me: int = Depends(current_patient)):
+    """Ask Ana again about the patient's last message (after a connection problem)."""
+    c = _own_checkin(checkin_id, me)
+    if c["transcript"][-1][0] != "Patient":
+        raise HTTPException(status_code=400, detail="There is nothing to retry.")
+    return _ana_turn(checkin_id, c)
 
 
 @app.post("/checkins/{checkin_id}/end")

@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import AnaAvatar from './AnaAvatar';
-import { sendReply, startCheckin } from './api';
+import { endCheckin, retryReply, sendReply, startCheckin } from './api';
 import { isListeningSupported, speak, startListening, stopSpeaking } from './speech';
 import { colors, serif } from './theme';
 
@@ -36,6 +36,7 @@ export default function CheckInScreen({ patient, settings }) {
   const [error, setError] = useState('');
   const [listening, setListening] = useState(false); // microphone is on
   const [hint, setHint] = useState('');
+  const [failed, setFailed] = useState(false); // Ana couldn't answer the last message
   const scrollRef = useRef(null);
   const micRef = useRef(null); // the running microphone, if any
   const sendRef = useRef(null); // latest handleSend, used when the microphone finishes
@@ -136,7 +137,7 @@ export default function CheckInScreen({ patient, settings }) {
 
   async function handleSend(text) {
     const message = text.trim();
-    if (!message || busy || status !== 'chatting') return;
+    if (!message || busy || failed || status !== 'chatting') return;
     if (micRef.current) cancelMic();
     setError('');
     setHint('');
@@ -144,15 +145,45 @@ export default function CheckInScreen({ patient, settings }) {
     setMessages((m) => [...m, { from: 'patient', text: message }]);
     setBusy(true);
     try {
-      const data = await sendReply(checkinId, message);
-      const meds = SHOW_MEDS_AFTER.includes(message) ? patient.medications : null;
-      setMessages((m) => [...m, { from: 'ana', text: data.ana_reply, meds }]);
-      setStatus(data.done ? 'done' : 'chatting');
+      showAnaReply(await sendReply(checkinId, message), message);
     } catch (e) {
-      setError(e.message);
+      setFailed(true);
     } finally {
       setBusy(false);
     }
+  }
+
+  function showAnaReply(data, patientMessage) {
+    const meds = SHOW_MEDS_AFTER.includes(patientMessage) ? patient.medications : null;
+    setMessages((m) => [...m, { from: 'ana', text: data.ana_reply, meds }]);
+    setStatus(data.done ? 'done' : 'chatting');
+    setFailed(false);
+  }
+
+  // After a connection problem: ask Ana again about the last message (no retyping).
+  async function handleRetry() {
+    setBusy(true);
+    try {
+      const lastPatient = [...messages].reverse().find((m) => m.from === 'patient');
+      showAnaReply(await retryReply(checkinId), lastPatient?.text);
+    } catch (e) {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Give up for now: save what the patient said (marked as not summarised).
+  async function handleEndAndSave() {
+    setBusy(true);
+    try {
+      await endCheckin(checkinId);
+    } catch (e) {
+      // Nothing more we can do here; the API keeps the message until it restarts.
+    }
+    setBusy(false);
+    setFailed(false);
+    setStatus('done');
   }
 
   sendRef.current = handleSend;
@@ -162,6 +193,7 @@ export default function CheckInScreen({ patient, settings }) {
     stopSpeaking();
     cancelMic();
     setHint('');
+    setFailed(false);
     setMessages([]);
     setCheckinId(null);
     setInput('');
@@ -240,6 +272,28 @@ export default function CheckInScreen({ patient, settings }) {
           </View>
         )}
 
+        {failed && !busy && (
+          <View style={styles.failedBox}>
+            <Text style={styles.failedText}>
+              I couldn't reach my server just now. Your message is safe.
+            </Text>
+            <View style={styles.failedButtons}>
+              <Pressable
+                style={({ pressed }) => [styles.failedPrimary, pressed && styles.pressed]}
+                onPress={handleRetry}
+              >
+                <Text style={styles.failedPrimaryText}>Try again</Text>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.failedSecondary, pressed && styles.pressed]}
+                onPress={handleEndAndSave}
+              >
+                <Text style={styles.failedSecondaryText}>End and save</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
+
         {status === 'done' && (
           <>
             <Text style={styles.doneNote}>
@@ -265,7 +319,7 @@ export default function CheckInScreen({ patient, settings }) {
         </View>
       )}
 
-      {status === 'chatting' && (
+      {status === 'chatting' && !failed && (
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
@@ -402,6 +456,22 @@ const styles = StyleSheet.create({
   doneNote: { textAlign: 'center', color: colors.muted, fontSize: 13, marginTop: 8 },
   error: { textAlign: 'center', color: colors.error, fontSize: 13, marginTop: 12 },
   hint: { textAlign: 'center', color: colors.muted, fontSize: 13, marginTop: 8 },
+
+  failedBox: {
+    backgroundColor: colors.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: 14,
+    marginLeft: 38,
+    marginBottom: 14,
+  },
+  failedText: { fontSize: 14, color: colors.text, lineHeight: 20 },
+  failedButtons: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  failedPrimary: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16 },
+  failedPrimaryText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+  failedSecondary: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 16 },
+  failedSecondaryText: { color: colors.text, fontWeight: '600', fontSize: 14 },
 
   listeningBar: {
     flexDirection: 'row',

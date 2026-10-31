@@ -54,5 +54,8 @@ export const sendReply = (checkinId, message) =>
     body: JSON.stringify({ message }),
   });
 
+export const retryReply = (checkinId) =>
+  request(`/checkins/${checkinId}/retry`, { method: 'POST' });
+
 export const endCheckin = (checkinId) =>
   request(`/checkins/${checkinId}/end`, { method: 'POST' });
