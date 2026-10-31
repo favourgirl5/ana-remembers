@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import AnaAvatar from './AnaAvatar';
 import { sendReply, startCheckin } from './api';
+import { isListeningSupported, speak, startListening, stopSpeaking } from './speech';
 import { colors, serif } from './theme';
 
 const QUICK_REPLIES = ['Yes, all done', 'Not yet', 'I forgot'];
@@ -25,14 +26,82 @@ function greetingFor(date) {
   return 'Good evening';
 }
 
-export default function CheckInScreen({ patient }) {
+export default function CheckInScreen({ patient, settings }) {
   const [messages, setMessages] = useState([]); // { from: 'ana' | 'patient', text, meds? }
   const [checkinId, setCheckinId] = useState(null);
   const [status, setStatus] = useState('idle'); // idle | chatting | done
   const [busy, setBusy] = useState(false); // waiting for Ana
   const [input, setInput] = useState('');
   const [error, setError] = useState('');
+  const [listening, setListening] = useState(false); // microphone is on
+  const [hint, setHint] = useState('');
   const scrollRef = useRef(null);
+  const micRef = useRef(null); // the running microphone, if any
+  const sendRef = useRef(null); // latest handleSend, used when the microphone finishes
+  const canListen = isListeningSupported();
+
+  // ---------- Microphone ----------
+  function startMic() {
+    if (!canListen || micRef.current) return;
+    stopSpeaking(); // never listen while Ana is still talking
+    setHint('');
+    setInput('');
+    setListening(true);
+    let blocked = false;
+    micRef.current = startListening({
+      onResult: (text) => setInput(text), // show what the app heard
+      onError: (err) => {
+        if (err === 'not-allowed') {
+          blocked = true;
+          setHint('Microphone access is blocked. Allow it in the browser to talk to Ana.');
+        }
+      },
+      onEnd: (finalText) => {
+        micRef.current = null;
+        setListening(false);
+        if (finalText) sendRef.current?.(finalText);
+        else if (!blocked) {
+          setHint("I didn't catch that. Tap the microphone to try again, or type your answer.");
+        }
+      },
+    });
+  }
+
+  function stopMic() {
+    micRef.current?.stop(); // finishes and sends what was heard
+  }
+
+  function cancelMic() {
+    micRef.current?.cancel();
+    micRef.current = null;
+    setListening(false);
+  }
+
+  // ---------- Ana's voice + hands-free ----------
+  // When Ana sends a message: read it aloud (if voice is on), then listen (if hands-free is on).
+  // Runs on the device: no Gemini requests.
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (last?.from !== 'ana') return;
+    const listenAfter = settings.handsFree && status === 'chatting';
+    if (settings.voiceOn) {
+      speak(last.text, () => {
+        if (listenAfter) startMic();
+      });
+    } else if (listenAfter) {
+      startMic();
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    if (!settings.voiceOn) stopSpeaking();
+  }, [settings.voiceOn]);
+
+  // Stop voice and microphone when leaving the screen
+  useEffect(() => () => {
+    stopSpeaking();
+    micRef.current?.cancel();
+  }, []);
 
   const now = new Date();
   const firstName = patient.patient.FullName?.split(' ')[0] ?? '';
@@ -66,7 +135,9 @@ export default function CheckInScreen({ patient }) {
   async function handleSend(text) {
     const message = text.trim();
     if (!message || busy || status !== 'chatting') return;
+    if (micRef.current) cancelMic();
     setError('');
+    setHint('');
     setInput('');
     setMessages((m) => [...m, { from: 'patient', text: message }]);
     setBusy(true);
@@ -80,6 +151,20 @@ export default function CheckInScreen({ patient }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  sendRef.current = handleSend;
+
+  // Clear the finished conversation so the patient can start a new check-in.
+  function resetCheckin() {
+    stopSpeaking();
+    cancelMic();
+    setHint('');
+    setMessages([]);
+    setCheckinId(null);
+    setInput('');
+    setError('');
+    setStatus('idle');
   }
 
   return (
@@ -154,13 +239,29 @@ export default function CheckInScreen({ patient }) {
         )}
 
         {status === 'done' && (
-          <Text style={styles.doneNote}>
-            Today's check-in is saved. You can come back and talk any time.
-          </Text>
+          <>
+            <Text style={styles.doneNote}>
+              Today's check-in is saved. You can come back and talk any time.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [styles.startButton, styles.againButton, pressed && styles.pressed]}
+              onPress={resetCheckin}
+            >
+              <Text style={styles.startText}>Start a new check-in</Text>
+            </Pressable>
+          </>
         )}
 
+        {hint ? <Text style={styles.hint}>{hint}</Text> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </ScrollView>
+
+      {listening && (
+        <View style={styles.listeningBar}>
+          <View style={styles.listeningDot} />
+          <Text style={styles.listeningText}>Ana is listening… speak now</Text>
+        </View>
+      )}
 
       {status === 'chatting' && (
         <View style={styles.inputRow}>
@@ -168,12 +269,21 @@ export default function CheckInScreen({ patient }) {
             style={styles.input}
             value={input}
             onChangeText={setInput}
-            placeholder="Or tell Ana in your own words…"
+            placeholder={listening ? 'Listening…' : 'Or tell Ana in your own words…'}
             placeholderTextColor={colors.muted}
             onSubmitEditing={() => handleSend(input)}
             returnKeyType="send"
             editable={!busy}
           />
+          {canListen && (
+            <Pressable
+              style={[styles.micButton, listening && styles.micActive, busy && styles.sendDisabled]}
+              onPress={listening ? stopMic : startMic}
+              disabled={busy}
+            >
+              <Text style={styles.micIcon}>{listening ? '■' : '🎤'}</Text>
+            </Pressable>
+          )}
           <Pressable
             style={[styles.sendButton, (!input.trim() || busy) && styles.sendDisabled]}
             onPress={() => handleSend(input)}
@@ -228,6 +338,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   startText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  againButton: { marginTop: 16 },
 
   anaRow: { flexDirection: 'row', gap: 10, marginBottom: 14, alignItems: 'flex-start' },
   anaColumn: { flex: 1, alignItems: 'flex-start' },
@@ -288,6 +399,31 @@ const styles = StyleSheet.create({
 
   doneNote: { textAlign: 'center', color: colors.muted, fontSize: 13, marginTop: 8 },
   error: { textAlign: 'center', color: colors.error, fontSize: 13, marginTop: 12 },
+  hint: { textAlign: 'center', color: colors.muted, fontSize: 13, marginTop: 8 },
+
+  listeningBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    backgroundColor: colors.primarySoft,
+  },
+  listeningDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.error },
+  listeningText: { fontSize: 13, color: colors.primary, fontWeight: '600' },
+
+  micButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micActive: { backgroundColor: colors.error, borderColor: colors.error },
+  micIcon: { fontSize: 18, color: colors.primary },
 
   inputRow: {
     flexDirection: 'row',

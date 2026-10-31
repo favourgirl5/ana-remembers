@@ -12,14 +12,16 @@ import {
 import AnaAvatar from './src/AnaAvatar';
 import CheckInScreen from './src/CheckInScreen';
 import ProgressScreen from './src/ProgressScreen';
+import SettingsScreen from './src/SettingsScreen';
 import { getPatient } from './src/api';
 import { PATIENT_ID } from './src/config';
 import { colors, serif } from './src/theme';
 
 export default function App() {
-  const [tab, setTab] = useState('checkin'); // checkin | progress
+  const [tab, setTab] = useState('checkin'); // checkin | progress | settings
   const [patient, setPatient] = useState(null);
   const [error, setError] = useState('');
+  const [settings, setSettings] = useState({ voiceOn: false, handsFree: false });
 
   // Loads Ana's memory of the patient. Costs no Gemini requests.
   function loadPatient() {
@@ -79,9 +81,16 @@ export default function App() {
             <>
               {/* Kept mounted so the conversation survives switching tabs */}
               <View style={[styles.flex, tab !== 'checkin' && styles.hidden]}>
-                <CheckInScreen patient={patient} />
+                <CheckInScreen patient={patient} settings={settings} />
               </View>
-                           {tab === 'progress' && <ProgressScreen patientId={patient.patient.PatientID} />}
+              {tab === 'progress' && <ProgressScreen patientId={patient.patient.PatientID} />}
+              {tab === 'settings' && (
+                <SettingsScreen
+                  settings={settings}
+                  onChange={setSettings}
+                  firstName={patient.patient.FullName?.split(' ')[0]}
+                />
+              )}
             </>
           )}
         </View>
@@ -90,6 +99,7 @@ export default function App() {
         <View style={styles.tabBar}>
           <TabButton label="Check-in" active={tab === 'checkin'} onPress={() => setTab('checkin')} />
           <TabButton label="My progress" active={tab === 'progress'} onPress={() => setTab('progress')} />
+          <TabButton label="Settings" active={tab === 'settings'} onPress={() => setTab('settings')} />
         </View>
       </View>
     </View>
@@ -141,8 +151,6 @@ const styles = StyleSheet.create({
   errorText: { color: colors.error, textAlign: 'center', marginBottom: 12 },
   retryButton: { backgroundColor: colors.primary, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 18 },
   retryText: { color: '#fff', fontWeight: '600' },
-  comingTitle: { fontFamily: serif, fontSize: 24, color: colors.text },
-  comingText: { color: colors.muted, marginTop: 6 },
 
   tabBar: {
     flexDirection: 'row',
@@ -153,7 +161,7 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.bg,
   },
-  tab: { paddingVertical: 8, paddingHorizontal: 18, borderRadius: 12 },
+  tab: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 12 },
   tabActive: { backgroundColor: colors.primarySoft },
   tabText: { fontSize: 13, color: colors.muted },
   tabTextActive: { color: colors.primary, fontWeight: '600' },
