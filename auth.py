@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 SECRET = os.getenv("AUTH_SECRET", "dev-only-change-me").encode()
-TOKEN_HOURS = 12
+TOKEN_HOURS = 24 * 30
 
 
 def hash_password(password):

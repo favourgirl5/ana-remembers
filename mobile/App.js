@@ -16,10 +16,16 @@ import ProgressScreen from './src/ProgressScreen';
 import SettingsScreen from './src/SettingsScreen';
 import { getPatient, setAuthToken, setUnauthorizedHandler } from './src/api';
 import { stopSpeaking } from './src/speech';
+import { clearSession, loadSession, saveSession } from './src/storage';
 import { colors, serif } from './src/theme';
 
 export default function App() {
-  const [auth, setAuth] = useState(null); // { token, patientId, fullName, email } after login
+  // Restore a saved login, so the patient stays logged in between visits.
+  const [auth, setAuth] = useState(() => {
+    const saved = loadSession();
+    if (saved?.token) setAuthToken(saved.token);
+    return saved;
+  });
   const [notice, setNotice] = useState(''); // message shown on the login screen
   const [tab, setTab] = useState('checkin'); // checkin | progress | settings
   const [patient, setPatient] = useState(null);
@@ -27,17 +33,18 @@ export default function App() {
   const [settings, setSettings] = useState({ voiceOn: false, handsFree: false });
 
   function handleLogin(data) {
-    setAuthToken(data.token);
-    setNotice('');
-    setAuth({
+        const session = {
       token: data.token,
       patientId: data.patient_id,
       fullName: data.full_name,
       email: data.email,
-    });
+    };
+    saveSession(session);
+    setAuth(session);
   }
 
   function handleLogout(message = '') {
+    clearSession();
     stopSpeaking();
     setAuthToken(null);
     setAuth(null);

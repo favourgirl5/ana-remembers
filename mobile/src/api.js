@@ -25,7 +25,7 @@ async function request(path, options = {}) {
     throw new Error("Can't reach Ana's server. Is the API running?");
   }
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && authToken) onUnauthorized?.();
+  if (res.status === 401 && path !== '/auth/login') onUnauthorized?.();
   if (!res.ok) {
     throw new Error(data.detail || `Something went wrong (error ${res.status}).`);
   }
