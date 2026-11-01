@@ -16,7 +16,7 @@ import ProgressScreen from './src/ProgressScreen';
 import SettingsScreen from './src/SettingsScreen';
 import { getPatient, setAuthToken, setUnauthorizedHandler } from './src/api';
 import { stopSpeaking } from './src/speech';
-import { clearSession, loadSession, saveSession } from './src/storage';
+import { clearSession, loadSession, loadSettings, saveSession, saveSettings } from './src/storage';
 import { colors, serif } from './src/theme';
 
 export default function App() {
@@ -32,8 +32,20 @@ export default function App() {
   const [error, setError] = useState('');
   const [settings, setSettings] = useState({ voiceOn: false, handsFree: false });
 
+  // Load this patient's saved voice settings when they log in.
+  useEffect(() => {
+    if (auth) setSettings(loadSettings(auth.patientId) ?? { voiceOn: false, handsFree: false });
+  }, [auth?.patientId]);
+
+  function changeSettings(next) {
+    setSettings(next);
+    if (auth) saveSettings(auth.patientId, next);
+  }
+
   function handleLogin(data) {
-        const session = {
+    setAuthToken(data.token);
+    setNotice('');
+    const session = {
       token: data.token,
       patientId: data.patient_id,
       fullName: data.full_name,
@@ -129,7 +141,7 @@ export default function App() {
                   {tab === 'settings' && (
                     <SettingsScreen
                       settings={settings}
-                      onChange={setSettings}
+                      onChange={changeSettings}
                       profile={{ fullName: auth.fullName, email: auth.email, initials }}
                       onLogout={() => handleLogout()}
                     />

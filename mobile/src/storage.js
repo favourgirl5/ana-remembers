@@ -23,3 +23,19 @@ export function clearSession() {
     if (typeof localStorage !== 'undefined') localStorage.removeItem(KEY);
   } catch (e) {}
 }
+
+// Voice settings, remembered per patient on this device.
+export function saveSettings(patientId, settings) {
+  try {
+    localStorage.setItem(`ana-settings-${patientId}`, JSON.stringify(settings));
+  } catch (e) {}
+}
+
+export function loadSettings(patientId) {
+  try {
+    const raw = localStorage.getItem(`ana-settings-${patientId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
