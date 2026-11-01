@@ -2,7 +2,7 @@
 import time
 import json
  
-from db import get_patient_context, store_session
+from db import get_patient_context, store_session, upsert_concerns
 from gemini_client import get_ai_response
 from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_response
  
@@ -45,6 +45,7 @@ def run_checkin(patient_id):
 
     medication_taken = None
     summary = ""
+    concerns = []
     unsummarised = []
 
     # 3. Conversation loop: patient replies, Ana answers, until done
@@ -78,29 +79,26 @@ def run_checkin(patient_id):
             medication_taken = result["medication_taken"]
         if result["summary"]:
             summary = result["summary"]
+        if result.get("concerns"):
+            concerns = result["concerns"]
         unsummarised.clear()
 
         if last_turn or result["conversation_done"]:
             break
 
-    # 4. Save the session once, so Ana remembers next time
+        # 4. Save the session once, so Ana remembers next time
     if not summary:
         print("Nothing to save from this check-in.")
         return
     try:
-       session_id = store_session(patient_id, medication_taken, summary)
-       print(f"[Saved session {session_id}] medication_taken={medication_taken}")
-       print(f"[Summary] {summary}")
+        session_id = store_session(patient_id, medication_taken, summary)
+        print(f"[Saved session {session_id}] medication_taken={medication_taken}")
+        print(f"[Summary] {summary}")
+        upsert_concerns(patient_id, concerns)
+        print(f"[Concerns updated] {[c.get('concern') for c in concerns]}")
     except Exception as e:
-       backup = {"patient_id": patient_id, "medication_taken": medication_taken,
-                "summary": summary, "time": time.strftime("%Y-%m-%d %H:%M:%S")}
-       with open("unsaved_sessions.jsonl", "a", encoding="utf-8") as f:
-        f.write(json.dumps(backup) + "\n")
-       print(f"[Database unavailable: session kept in unsaved_sessions.jsonl] {str(e)[:80]}")
-      
-
-if __name__ == "__main__":
-    import sys
-    patient_id = int(sys.argv[1]) if len(sys.argv) > 1 else PATIENT_ID
-    run_checkin(patient_id)
-    
+        backup = {"patient_id": patient_id, "medication_taken": medication_taken,
+                  "summary": summary, "time": time.strftime("%Y-%m-%d %H:%M:%S")}
+        with open("unsaved_sessions.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(backup) + "\n")
+        print(f"[Database unavailable: session kept in unsaved_sessions.jsonl] {str(e)[:80]}")

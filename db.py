@@ -81,9 +81,19 @@ def get_patient_context(patient_id, recent_sessions=5):
             "FROM Sessions WHERE PatientID = ? ORDER BY SessionDate DESC",
             recent_sessions, patient_id,
         )
+        
         sessions = _rows_to_dicts(cur)
 
+        cur.execute(
+            "SELECT Concern, Category, Trend, FirstMentioned, LastUpdated, Notes "
+            "FROM PatientConcerns WHERE PatientID = ? AND Status = 'open' "
+            "ORDER BY LastUpdated DESC",
+            patient_id,
+        )
+        concerns = _rows_to_dicts(cur)
+
         return {
+            "open_concerns": concerns,
             "patient": patient[0],
             "diagnoses": diagnoses,
             "medications": medications,
@@ -151,3 +161,40 @@ def set_password_hash(patient_id, password_hash):
            conn.commit()
        finally:
            conn.close()
+
+def upsert_concerns(patient_id, concerns):
+    """Update the patient's ongoing-concerns list after a check-in."""
+    if not concerns:
+        return
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        for item in concerns:
+            name = str(item.get("concern", "")).strip()[:200]
+            if not name:
+                continue
+            status = "resolved" if item.get("status") == "resolved" else "open"
+            trend = (str(item.get("trend") or "").strip()[:20]) or None
+            category = (str(item.get("category") or "other").strip()[:30]) or "other"
+            note = (str(item.get("note") or "").strip()[:500]) or None
+            cur.execute(
+                "SELECT ConcernID FROM PatientConcerns WHERE PatientID = ? AND Concern = ?",
+                patient_id, name,
+            )
+            row = cur.fetchone()
+            if row:
+                cur.execute(
+                    "UPDATE PatientConcerns SET Status = ?, Trend = COALESCE(?, Trend), "
+                    "Notes = COALESCE(?, Notes), LastUpdated = SYSDATETIME() WHERE ConcernID = ?",
+                    status, trend, note, row[0],
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO PatientConcerns (PatientID, Concern, Category, Status, Trend, "
+                    "FirstMentioned, LastUpdated, Notes) "
+                    "VALUES (?, ?, ?, ?, ?, SYSDATETIME(), SYSDATETIME(), ?)",
+                    patient_id, name, category, status, trend, note,
+                )
+        conn.commit()
+    finally:
+        conn.close()

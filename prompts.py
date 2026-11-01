@@ -26,8 +26,13 @@ TONE
   from earlier check-ins.
 - Avoid heart idioms such as "lose heart", "take heart" or "heartbroken": this patient
   lives with heart failure.
+- Don't start replies with stock phrases like "That's completely okay/fine/
+  understandable". Respond to what the patient actually said instead.
+
 
 MEMORY
+- ONGOING CONCERNS lists issues that are still open, even if they are not in the recent
+  check-ins. Keep them in mind and follow up on the important ones over time, one at a time.
 - Base your questions on the patient's records and earlier check-ins: their diagnoses,
   medications and anything they mentioned before (symptoms, side effects, mood).
   Mention past details naturally, without listing them.
@@ -133,6 +138,9 @@ DIAGNOSES (name | date | presenting symptoms)
 MEDICATIONS (name | dosage | frequency | start date)
 {_format_list(ctx["medications"], ["MedicationName", "Dosage", "Frequency", "StartDate"])}
 
+ONGOING CONCERNS, still open however long ago (concern | type | trend | first mentioned | last updated | notes)
+{_format_list(ctx.get("open_concerns", []), ["Concern", "Category", "Trend", "FirstMentioned", "LastUpdated", "Notes"])}
+
 RECENT CHECK-INS, newest first (date | medication taken | summary)
 {_format_list(ctx["recent_sessions"], ["SessionDate", "MedicationTaken", "ConversationSummary"],
               empty="No earlier check-ins. This is the first one.")}"""
@@ -180,12 +188,18 @@ TODAY'S CHECK-IN SO FAR
 TASK
 Write Ana's next message. {ending}
 Return ONLY valid JSON, no extra text, in this exact shape:
-{{"ana_reply": "<Ana's next message>", "conversation_done": true | false, "medication_taken": true | false | null, "summary": "<1-3 neutral sentences>"}}
+{{"ana_reply": "<Ana's next message>", "conversation_done": true | false, "medication_taken": true | false | null, "summary": "<1-3 neutral sentences>", "concerns": [{{"concern": "<short name>", "category": "symptom | medication | mood | care | other", "trend": "new | same | better | worse | unknown", "status": "open | resolved", "note": "<one short sentence>"}}]}}
 
 - ana_reply: follows all the rules above (including the symptom, medication and mood rules).
 - conversation_done: true when Ana is saying goodbye, otherwise false.
 - medication_taken: true if they clearly took it today, false if they clearly did not,
   null if not said yet.
+- concerns: every health issue discussed in today's check-in so far. If it is the same
+  issue as one in ONGOING CONCERNS, use exactly that name; otherwise a short new name
+  (e.g. "ankle swelling"). Only mark "resolved" if the patient clearly says it is gone
+  and nothing in the records contradicts it; if the patient has memory problems or it
+  contradicts earlier check-ins, keep it "open" and explain in the note. Use [] if
+  nothing relevant was discussed.
 - summary: covers the WHOLE check-in so far, factual and neutral, in third person. Always
   name every symptom or side effect mentioned and whether it is new, the same, better or
   worse than before (if said). Always describe the patient's mood (e.g. low, withdrawn,
@@ -212,6 +226,7 @@ def parse_summary_response(text):
             "conversation_done": bool(data.get("conversation_done", False)),
             "medication_taken": data.get("medication_taken"),
             "summary": str(data.get("summary", "")).strip(),
+            "concerns": data.get("concerns") if isinstance(data.get("concerns"), list) else [],
         }
     except (ValueError, AttributeError):
         return {
@@ -219,6 +234,7 @@ def parse_summary_response(text):
             "conversation_done": True,
             "medication_taken": None,
             "summary": cleaned,
+            "concerns": [],
         }
 
 

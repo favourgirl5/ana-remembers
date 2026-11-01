@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from auth import check_password, make_token, read_token
-from db import get_login, get_patient_context, get_session_dates, store_session
+from db import get_login, get_patient_context, get_session_dates, store_session, upsert_concerns
 from main import ask_gemini, MAX_TURNS, EXIT_WORDS
 from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_response
 
@@ -87,8 +87,12 @@ def _save_checkin(checkin_id):
             f"[Connection lost, not summarised] Patient said: {raw_notes}"
     if not summary:
         return None
-    return store_session(c["patient_id"], c["medication_taken"], summary)
-
+    session_id = store_session(c["patient_id"], c["medication_taken"], summary)
+    try:
+        upsert_concerns(c["patient_id"], c.get("concerns", []))
+    except Exception as e:
+        print(f"[Could not update concerns: {e}]")
+    return session_id
 
 def _ana_turn(checkin_id, c):
     """Ask Gemini for Ana's next message about the conversation so far.
@@ -109,6 +113,8 @@ def _ana_turn(checkin_id, c):
         c["medication_taken"] = result["medication_taken"]
     if result["summary"]:
         c["summary"] = result["summary"]
+    if result.get("concerns"):
+        c["concerns"] = result["concerns"]
     c["unsummarised"].clear()
 
     done = last_turn or result["conversation_done"]
