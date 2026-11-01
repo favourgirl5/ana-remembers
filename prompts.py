@@ -190,11 +190,14 @@ def build_checkin_prompt(ctx):
 
 TASK
 Write Ana's opening message for today. Greet the patient by first name and ask ONE
-question. If the most recent check-in says to follow up on mood, make that question a
-gentle, natural check on how they have been feeling since last time, in plain everyday
-words such as "How have you been feeling since we last spoke?" (do not quote the old
-conversation). Otherwise, simply ask how they are doing today. Medication and
-symptoms will come up in the next messages, one at a time.
+question. If a recent check-in summary starts with "EMERGENCY:", your ONE question must
+gently ask whether they were able to get help (ask how they feel now in your next
+message, not in the same one). Otherwise, if the most
+recent check-in says to follow up on mood, make that question a gentle, natural check
+on how they have been feeling since last time, in plain everyday words such as "How
+have you been feeling since we last spoke?" (do not quote the old conversation).
+Otherwise, simply ask how they are doing today. Medication and symptoms will come up
+in the next messages, one at a time.
 Reply with only the message text."""
 
 
