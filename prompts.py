@@ -5,8 +5,7 @@ Two prompts per check-in:
   2. build_summary_prompt   -> Ana's next message + a running summary for the Sessions table
 """
 import json
-from datetime import datetime
-
+from datetime import date, datetime
 
 ANA_PERSONA = """You are Ana, a warm and calm check-in companion for a patient living with heart failure.
 Rules:
@@ -145,6 +144,17 @@ RECENT CHECK-INS, newest first (date | medication taken | summary)
 {_format_list(ctx["recent_sessions"], ["SessionDate", "MedicationTaken", "ConversationSummary"],
               empty="No earlier check-ins. This is the first one.")}"""
 
+def _focus_concern(ctx):
+    """Python (not Gemini) picks one open symptom Ana must ask about today:
+    the one that has gone longest without being discussed."""
+    today = date.today().isoformat()
+    candidates = [
+        c for c in ctx.get("open_concerns", [])
+        if c.get("Category") == "symptom" and not str(c.get("LastUpdated", "")).startswith(today)
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda c: str(c.get("LastUpdated", "")))
 
 def build_checkin_prompt(ctx):
     """Prompt for Gemini call 1: Ana's opening message."""
@@ -165,6 +175,13 @@ Reply with only the message text."""
 def _format_transcript(transcript):
     return "\n".join(f"{speaker}: {text}" for speaker, text in transcript)
 
+def _focus_line(ctx):
+    focus = _focus_concern(ctx)
+    if not focus:
+        return ""
+    return (f"\nMUST ASK TODAY: before the check-in ends, gently ask about "
+            f"'{focus['Concern']}' (last discussed {str(focus['LastUpdated'])[:10]}), "
+            f"unless it has already come up today.")
 
 def build_summary_prompt(ctx, transcript, last_turn=False):
     """Prompt for each patient reply: Ana's next message + a running summary for Sessions.
@@ -186,7 +203,7 @@ TODAY'S CHECK-IN SO FAR
 {_format_transcript(transcript)}
 
 TASK
-Write Ana's next message. {ending}
+Write Ana's next message. {ending}{_focus_line(ctx)}
 Return ONLY valid JSON, no extra text, in this exact shape:
 {{"ana_reply": "<Ana's next message>", "conversation_done": true | false, "medication_taken": true | false | null, "summary": "<1-3 neutral sentences>", "concerns": [{{"concern": "<short name>", "category": "symptom | medication | mood | care | other", "trend": "new | same | better | worse | unknown", "status": "open | resolved", "note": "<one short sentence>"}}]}}
 
