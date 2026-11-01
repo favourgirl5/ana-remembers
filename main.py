@@ -1,8 +1,9 @@
 """Run one Ana Remembers check-in in the terminal."""
-import time
 import json
- 
+import time
+
 from db import get_patient_context, store_session, upsert_concerns
+from escalation import higher, primary_contact, trend_escalation
 from gemini_client import get_ai_response
 from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_response
  
@@ -47,6 +48,8 @@ def run_checkin(patient_id):
     summary = ""
     concerns = []
     unsummarised = []
+    # Gradual decline: Python's trend rule decides this before the conversation starts.
+    escalation = trend_escalation(ctx.get("open_concerns", []))
 
     # 3. Conversation loop: patient replies, Ana answers, until done
     for turn in range(1, MAX_TURNS + 1):
@@ -81,24 +84,40 @@ def run_checkin(patient_id):
             summary = result["summary"]
         if result.get("concerns"):
             concerns = result["concerns"]
+        if result.get("escalation"):  # acute red flag reported by Gemini
+            acute = (result["escalation"], result.get("escalation_reason") or "Reported during check-in")
+            escalation = higher(escalation, acute)
         unsummarised.clear()
 
         if last_turn or result["conversation_done"]:
             break
 
-        # 4. Save the session once, so Ana remembers next time
+    # 4. Save the session once, so Ana remembers next time
     if not summary:
         print("Nothing to save from this check-in.")
         return
+    level, reason = escalation
     try:
-        session_id = store_session(patient_id, medication_taken, summary)
+        session_id = store_session(patient_id, medication_taken, summary, level, reason)
         print(f"[Saved session {session_id}] medication_taken={medication_taken}")
         print(f"[Summary] {summary}")
+        if level:
+            contact = primary_contact(ctx.get("care_contacts", []))
+            who = ("112 + " if level == "emergency" else "") + \
+                (f"{contact['Role']}: {contact['Name']} ({contact.get('Phone')})" if contact else "")
+            print(f"[ESCALATION {level.upper()}] {reason} -> notify {who}")
         upsert_concerns(patient_id, concerns)
         print(f"[Concerns updated] {[c.get('concern') for c in concerns]}")
     except Exception as e:
         backup = {"patient_id": patient_id, "medication_taken": medication_taken,
-                  "summary": summary, "time": time.strftime("%Y-%m-%d %H:%M:%S")}
+                  "summary": summary, "escalation": level, "escalation_reason": reason,
+                  "time": time.strftime("%Y-%m-%d %H:%M:%S")}
         with open("unsaved_sessions.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(backup) + "\n")
         print(f"[Database unavailable: session kept in unsaved_sessions.jsonl] {str(e)[:80]}")
+
+
+if __name__ == "__main__":
+    import sys
+    patient_id = int(sys.argv[1]) if len(sys.argv) > 1 else PATIENT_ID
+    run_checkin(patient_id)

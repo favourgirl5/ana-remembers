@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from auth import check_password, make_token, read_token
 from db import get_login, get_patient_context, get_session_dates, store_session, upsert_concerns
+from escalation import higher, primary_contact, trend_escalation
 from main import ask_gemini, MAX_TURNS, EXIT_WORDS
 from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_response
 
@@ -30,6 +31,7 @@ app.add_middleware(
 # Check-ins that are still in progress, kept in memory while the conversation runs.
 # Long-term memory (the Sessions table) is still stored in SQL Server.
 CHECKINS = {}
+
 
 class LoginRequest(BaseModel):
     email: str
@@ -87,12 +89,28 @@ def _save_checkin(checkin_id):
             f"[Connection lost, not summarised] Patient said: {raw_notes}"
     if not summary:
         return None
-    session_id = store_session(c["patient_id"], c["medication_taken"], summary)
+
+    level, reason = c.get("escalation", (None, None))
+    session_id = store_session(c["patient_id"], c["medication_taken"], summary, level, reason)
+    if level:
+        _notify_care_team(c, level, reason)
     try:
         upsert_concerns(c["patient_id"], c.get("concerns", []))
     except Exception as e:
         print(f"[Could not update concerns: {e}]")
     return session_id
+
+
+def _notify_care_team(c, level, reason):
+    """Prototype 'notification': the escalation is saved with the session (care-team view)
+    and shown here. A real system would send an email/SMS or page the care team."""
+    name = c["ctx"]["patient"].get("FullName")
+    contact = primary_contact(c["ctx"].get("care_contacts", []))
+    who = "112 + " if level == "emergency" else ""
+    if contact:
+        who += f"{contact['Role']}: {contact['Name']} ({contact.get('Phone') or 'no phone'})"
+    print(f"[ESCALATION {level.upper()}] {name}: {reason} -> notify {who}")
+
 
 def _ana_turn(checkin_id, c):
     """Ask Gemini for Ana's next message about the conversation so far.
@@ -115,6 +133,9 @@ def _ana_turn(checkin_id, c):
         c["summary"] = result["summary"]
     if result.get("concerns"):
         c["concerns"] = result["concerns"]
+    if result.get("escalation"):  # acute red flag reported by Gemini
+        acute = (result["escalation"], result.get("escalation_reason") or "Reported during check-in")
+        c["escalation"] = higher(c.get("escalation", (None, None)), acute)
     c["unsummarised"].clear()
 
     done = last_turn or result["conversation_done"]
@@ -199,6 +220,9 @@ def start_checkin(req: StartRequest, me: int = Depends(current_patient)):
         "medication_taken": None,
         "summary": "",
         "unsummarised": [],
+        "concerns": [],
+        # Gradual decline: Python's trend rule decides this before the conversation starts.
+        "escalation": trend_escalation(ctx.get("open_concerns", [])),
     }
     return {"checkin_id": checkin_id, "ana_message": ana_message}
 

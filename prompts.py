@@ -7,6 +7,8 @@ Two prompts per check-in:
 import json
 from datetime import date, datetime
 
+from escalation import trend_escalation
+
 ANA_PERSONA = """You are Ana, a warm and calm check-in companion for a patient living with heart failure.
 Rules:
 
@@ -56,10 +58,23 @@ MEMORY
   details. If there are no memory problems in their records, simply ask how it went.
 
 SYMPTOMS
-- If the patient reports a NEW symptom, or a known symptom that is WORSE than in earlier
-  check-ins, gently encourage them to contact their doctor. If it sounds severe (chest
-  pain, severe breathlessness at rest, fainting), tell them to call 112. A known symptom
-  that is stable needs no referral.
+- Judge every symptom by how serious it is NOW, whatever the patient's history:
+  * EMERGENCY: chest pain or pressure, severe breathlessness at rest, fainting, or
+    sudden confusion. Stop the routine check-in immediately. Tell them clearly and
+    calmly to call 112 now. Do not ask other questions, do not suggest it might be
+    something harmless (even if a similar complaint was harmless before), and do not
+    give any medication advice.
+  * URGENT: a NEW symptom, or a known symptom that is clearly WORSE (see the warning
+    signs below). Encourage them to contact their GP or heart failure nurse today, or
+    the out-of-hours GP (huisartsenpost) outside office hours.
+  * ROUTINE: a known symptom that is stable. No referral needed; just note it.
+- If the patient plays down a serious symptom ("it's probably nothing"), stay calm but
+  don't go along with it.
+- When you advise contacting someone, name the right person from CARE CONTACTS and give
+  their phone number, so the patient knows exactly who to call.
+- If there is a CARE TEAM ALERT below, gently tell the patient once, during the
+  check-in, that because these symptoms have been getting worse for a few weeks, you
+  are letting their care team know, and encourage them to call their GP today.
 - If a symptom you advised them to see the doctor about is still there, kindly ask
   whether they have been able to contact their doctor, and if not, encourage them to do
   so. If they have seen the doctor, ask how it went and whether the doctor changed anything.
@@ -140,9 +155,20 @@ MEDICATIONS (name | dosage | frequency | start date)
 ONGOING CONCERNS, still open however long ago (concern | type | trend | first mentioned | last updated | notes)
 {_format_list(ctx.get("open_concerns", []), ["Concern", "Category", "Trend", "FirstMentioned", "LastUpdated", "Notes"])}
 
+CARE CONTACTS (role | name | phone). Emergencies: always 112.
+{_format_list(ctx.get("care_contacts", []), ["Role", "Name", "Phone"])}
+{_care_alert(ctx)}
 RECENT CHECK-INS, newest first (date | medication taken | summary)
 {_format_list(ctx["recent_sessions"], ["SessionDate", "MedicationTaken", "ConversationSummary"],
               empty="No earlier check-ins. This is the first one.")}"""
+
+def _care_alert(ctx):
+    """Python's trend rule (escalation.py), not Gemini, decides this alert."""
+    level, reason = trend_escalation(ctx.get("open_concerns", []))
+    if not level:
+        return ""
+    return f"\nCARE TEAM ALERT ({level}): {reason}. The care team will be informed after this check-in.\n"
+
 
 def _focus_concern(ctx):
     """Python (not Gemini) picks one open symptom Ana must ask about today:
@@ -205,12 +231,16 @@ TODAY'S CHECK-IN SO FAR
 TASK
 Write Ana's next message. {ending}{_focus_line(ctx)}
 Return ONLY valid JSON, no extra text, in this exact shape:
-{{"ana_reply": "<Ana's next message>", "conversation_done": true | false, "medication_taken": true | false | null, "summary": "<1-3 neutral sentences>", "concerns": [{{"concern": "<short name>", "category": "symptom | medication | mood | care | other", "trend": "new | same | better | worse | unknown", "status": "open | resolved", "note": "<one short sentence>"}}]}}
+{{"ana_reply": "<Ana's next message>", "conversation_done": true | false, "medication_taken": true | false | null, "escalation": "none | urgent | emergency", "escalation_reason": "<short reason, or empty>", "summary": "<1-3 neutral sentences>", "concerns": [{{"concern": "<short name>", "category": "symptom | medication | mood | care | other", "trend": "new | same | better | worse | unknown", "status": "open | resolved", "note": "<one short sentence>"}}]}}
 
 - ana_reply: follows all the rules above (including the symptom, medication and mood rules).
 - conversation_done: true when Ana is saying goodbye, otherwise false.
 - medication_taken: true if they clearly took it today, false if they clearly did not,
   null if not said yet.
+- escalation: "emergency" if the patient reported an EMERGENCY symptom today, or is in
+  immediate danger; "urgent" if a symptom is new or clearly worse and needs the GP today,
+  or the patient hinted at not wanting to live; otherwise "none". escalation_reason says
+  why in a few words.
 - concerns: every health issue discussed in today's check-in so far. If it is the same
   issue as one in ONGOING CONCERNS, use exactly that name; otherwise a short new name
   (e.g. "ankle swelling"). Only mark "resolved" if the patient clearly says it is gone
@@ -231,7 +261,9 @@ Return ONLY valid JSON, no extra text, in this exact shape:
   contact doctor about <issue>; ask next time whether they did." If the patient hinted
   at not wanting to live or at harming themselves,
   add "URGENT: patient expressed thoughts of not wanting to live; care team must be
-  informed." Include anything else worth following up. No judgments, no advice."""
+  informed." If the patient reported an emergency symptom, start the summary with
+  "EMERGENCY:" and say what it was and that the patient was told to call 112.
+  Include anything else worth following up. No judgments, no advice."""
 
 def parse_summary_response(text):
     """Turn Gemini's JSON into a dict. Falls back safely if the JSON is broken."""
@@ -244,6 +276,8 @@ def parse_summary_response(text):
             "medication_taken": data.get("medication_taken"),
             "summary": str(data.get("summary", "")).strip(),
             "concerns": data.get("concerns") if isinstance(data.get("concerns"), list) else [],
+            "escalation": data.get("escalation") if data.get("escalation") in ("urgent", "emergency") else None,
+            "escalation_reason": str(data.get("escalation_reason") or "").strip(),
         }
     except (ValueError, AttributeError):
         return {
@@ -252,6 +286,8 @@ def parse_summary_response(text):
             "medication_taken": None,
             "summary": cleaned,
             "concerns": [],
+            "escalation": None,
+            "escalation_reason": "",
         }
 
 

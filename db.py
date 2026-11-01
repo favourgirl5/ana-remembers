@@ -81,19 +81,27 @@ def get_patient_context(patient_id, recent_sessions=5):
             "FROM Sessions WHERE PatientID = ? ORDER BY SessionDate DESC",
             recent_sessions, patient_id,
         )
-        
         sessions = _rows_to_dicts(cur)
 
         cur.execute(
-            "SELECT Concern, Category, Trend, FirstMentioned, LastUpdated, Notes "
+            "SELECT Concern, Category, Trend, FirstMentioned, LastUpdated, Notes, "
+            "WorseCount, WorseSince "
             "FROM PatientConcerns WHERE PatientID = ? AND Status = 'open' "
             "ORDER BY LastUpdated DESC",
             patient_id,
         )
         concerns = _rows_to_dicts(cur)
 
+        cur.execute(
+            "SELECT Role, Name, Phone, IsPrimary "
+            "FROM CareContacts WHERE PatientID = ? ORDER BY IsPrimary DESC, Role",
+            patient_id,
+        )
+        contacts = _rows_to_dicts(cur)
+
         return {
             "open_concerns": concerns,
+            "care_contacts": contacts,
             "patient": patient[0],
             "diagnoses": diagnoses,
             "medications": medications,
@@ -103,23 +111,27 @@ def get_patient_context(patient_id, recent_sessions=5):
         conn.close()
 
 
-def store_session(patient_id, medication_taken, summary):
-    """Insert one check-in. Returns the new SessionID."""
+def store_session(patient_id, medication_taken, summary,
+                  escalation_level=None, escalation_reason=None):
+    """Insert one check-in (with any escalation). Returns the new SessionID."""
     conn = get_connection()
     try:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO Sessions (PatientID, SessionDate, MedicationTaken, ConversationSummary) "
+            "INSERT INTO Sessions (PatientID, SessionDate, MedicationTaken, ConversationSummary, "
+            "EscalationLevel, EscalationReason) "
             "OUTPUT INSERTED.SessionID "
-            "VALUES (?, SYSDATETIME(), ?, ?)",
-            patient_id, medication_taken, summary,
+            "VALUES (?, SYSDATETIME(), ?, ?, ?, ?)",
+            patient_id, medication_taken, summary, escalation_level,
+            (escalation_reason or "")[:500] or None,
         )
         new_id = cur.fetchone()[0]
         conn.commit()
         return new_id
     finally:
         conn.close()
-        
+
+
 def get_session_dates(patient_id, days=60):
     """Dates (YYYY-MM-DD) on which the patient had a check-in, newest first."""
     conn = get_connection()
@@ -135,35 +147,41 @@ def get_session_dates(patient_id, days=60):
     finally:
         conn.close()
 
+
 def get_login(email):
-       """Login details for one patient. Only used to check passwords; never sent to Gemini."""
-       conn = get_connection()
-       try:
-           cur = conn.cursor()
-           cur.execute(
-               "SELECT PatientID, FullName, Email, PasswordHash FROM Patients WHERE Email = ?",
-               email,
-           )
-           rows = _rows_to_dicts(cur)
-           return rows[0] if rows else None
-       finally:
-           conn.close()
+    """Login details for one patient. Only used to check passwords; never sent to Gemini."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT PatientID, FullName, Email, PasswordHash FROM Patients WHERE Email = ?",
+            email,
+        )
+        rows = _rows_to_dicts(cur)
+        return rows[0] if rows else None
+    finally:
+        conn.close()
 
 
 def set_password_hash(patient_id, password_hash):
-       conn = get_connection()
-       try:
-           cur = conn.cursor()
-           cur.execute(
-               "UPDATE Patients SET PasswordHash = ? WHERE PatientID = ?",
-               password_hash, patient_id,
-           )
-           conn.commit()
-       finally:
-           conn.close()
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE Patients SET PasswordHash = ? WHERE PatientID = ?",
+            password_hash, patient_id,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
 
 def upsert_concerns(patient_id, concerns):
-    """Update the patient's ongoing-concerns list after a check-in."""
+    """Update the patient's ongoing-concerns list after a check-in.
+
+    WorseCount / WorseSince track how long a concern has been getting worse:
+    'worse' adds one (and starts the clock); 'same', 'better' or resolved resets it.
+    """
     if not concerns:
         return
     conn = get_connection()
@@ -182,18 +200,35 @@ def upsert_concerns(patient_id, concerns):
                 patient_id, name,
             )
             row = cur.fetchone()
+            is_worse = trend == "worse" and status == "open"
+            resets = status == "resolved" or trend in ("same", "better")
             if row:
                 cur.execute(
                     "UPDATE PatientConcerns SET Status = ?, Trend = COALESCE(?, Trend), "
                     "Notes = COALESCE(?, Notes), LastUpdated = SYSDATETIME() WHERE ConcernID = ?",
                     status, trend, note, row[0],
                 )
+                if is_worse:
+                    cur.execute(
+                        "UPDATE PatientConcerns SET WorseCount = WorseCount + 1, "
+                        "WorseSince = COALESCE(WorseSince, SYSDATETIME()) WHERE ConcernID = ?",
+                        row[0],
+                    )
+                elif resets:
+                    cur.execute(
+                        "UPDATE PatientConcerns SET WorseCount = 0, WorseSince = NULL "
+                        "WHERE ConcernID = ?",
+                        row[0],
+                    )
+                # 'unknown' / no trend: leave the counter as it is
             else:
                 cur.execute(
                     "INSERT INTO PatientConcerns (PatientID, Concern, Category, Status, Trend, "
-                    "FirstMentioned, LastUpdated, Notes) "
-                    "VALUES (?, ?, ?, ?, ?, SYSDATETIME(), SYSDATETIME(), ?)",
+                    "FirstMentioned, LastUpdated, Notes, WorseCount, WorseSince) "
+                    "VALUES (?, ?, ?, ?, ?, SYSDATETIME(), SYSDATETIME(), ?, ?, "
+                    "CASE WHEN ? = 1 THEN SYSDATETIME() END)",
                     patient_id, name, category, status, trend, note,
+                    1 if is_worse else 0, 1 if is_worse else 0,
                 )
         conn.commit()
     finally:
