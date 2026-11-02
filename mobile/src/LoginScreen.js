@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import AnaAvatar from './AnaAvatar';
+import RegisterScreen from './RegisterScreen';
 import { login } from './api';
 import { colors, serif } from './theme';
 
@@ -19,6 +20,7 @@ export default function LoginScreen({ onLogin, notice }) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [registering, setRegistering] = useState(false);
 
   async function handleLogin() {
     if (!email.trim() || !password || busy) return;
@@ -31,6 +33,10 @@ export default function LoginScreen({ onLogin, notice }) {
       setError(e.message);
       setBusy(false);
     }
+  }
+
+  if (registering) {
+    return <RegisterScreen onRegistered={onLogin} onBack={() => setRegistering(false)} />;
   }
 
   return (
@@ -86,6 +92,10 @@ export default function LoginScreen({ onLogin, notice }) {
         >
           {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log in</Text>}
         </Pressable>
+
+        <Pressable style={styles.linkButton} onPress={() => setRegistering(true)}>
+          <Text style={styles.linkText}>New here? Create an account</Text>
+        </Pressable>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -130,4 +140,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   buttonText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  linkButton: { alignItems: 'center', paddingVertical: 16 },
+  linkText: { color: colors.primary, fontSize: 14, fontWeight: '600' },
 });

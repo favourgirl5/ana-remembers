@@ -233,3 +233,109 @@ def upsert_concerns(patient_id, concerns):
         conn.commit()
     finally:
         conn.close()
+
+
+# ---------- Registration and medical reports ----------
+
+def create_patient(full_name, email, password_hash, date_of_birth, baseline_weight_kg=None):
+    """New patient account. Returns the new PatientID."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO Patients (FullName, DateOfBirth, CreatedAt, Email, PasswordHash, "
+            "BaselineWeightKg, Allergies) OUTPUT INSERTED.PatientID "
+            "VALUES (?, ?, SYSDATETIME(), ?, ?, ?, NULL)",
+            full_name, date_of_birth, email, password_hash, baseline_weight_kg,
+        )
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        return new_id
+    finally:
+        conn.close()
+
+
+def _clean(value, limit):
+    text = str(value or "").strip()
+    return text[:limit] or None
+
+
+def _date_or_none(value):
+    text = str(value or "").strip()
+    if len(text) == 10 and text[4] == "-" and text[7] == "-" and text.replace("-", "").isdigit():
+        return text
+    return None
+
+
+def save_extracted_records(patient_id, records):
+    """Save the report items the patient confirmed. Skips items already in the record.
+    Returns how many of each were added."""
+    saved = {"diagnoses": 0, "medications": 0, "allergies": 0, "care_contacts": 0}
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+
+        for d in records.get("diagnoses") or []:
+            name = _clean(d.get("name"), 100)
+            if not name:
+                continue
+            cur.execute("SELECT 1 FROM Diagnoses WHERE PatientID = ? AND DiagnosisName = ?",
+                        patient_id, name)
+            if cur.fetchone():
+                continue
+            cur.execute(
+                "INSERT INTO Diagnoses (PatientID, DiagnosisName, DiagnosisDate, PresentingSymptoms) "
+                "VALUES (?, ?, COALESCE(?, CAST(GETDATE() AS DATE)), ?)",
+                patient_id, name, _date_or_none(d.get("date")), _clean(d.get("presenting_symptoms"), 255),
+            )
+            saved["diagnoses"] += 1
+
+        for m in records.get("medications") or []:
+            name = _clean(m.get("name"), 100)
+            if not name:
+                continue
+            cur.execute("SELECT 1 FROM Medications WHERE PatientID = ? AND MedicationName = ?",
+                        patient_id, name)
+            if cur.fetchone():
+                continue
+            cur.execute(
+                "INSERT INTO Medications (PatientID, MedicationName, Dosage, Frequency, StartDate) "
+                "VALUES (?, ?, ?, ?, COALESCE(?, CAST(GETDATE() AS DATE)))",
+                patient_id, name, _clean(m.get("dosage"), 50), _clean(m.get("frequency"), 100),
+                _date_or_none(m.get("start_date")),
+            )
+            saved["medications"] += 1
+
+        new_allergies = [a for a in (records.get("allergies") or []) if str(a).strip()]
+        if new_allergies:
+            cur.execute("SELECT Allergies FROM Patients WHERE PatientID = ?", patient_id)
+            row = cur.fetchone()
+            current = [a.strip() for a in str((row[0] if row else "") or "").split(",") if a.strip()]
+            current = [a for a in current if a.lower() not in ("none", "none known", "none recorded")]
+            for a in new_allergies:
+                if a.strip().lower() not in [c.lower() for c in current]:
+                    current.append(a.strip())
+                    saved["allergies"] += 1
+            cur.execute("UPDATE Patients SET Allergies = ? WHERE PatientID = ?",
+                        ", ".join(current)[:255], patient_id)
+
+        for c in records.get("care_contacts") or []:
+            name = _clean(c.get("name"), 150)
+            if not name:
+                continue
+            cur.execute("SELECT 1 FROM CareContacts WHERE PatientID = ? AND Name = ?", patient_id, name)
+            if cur.fetchone():
+                continue
+            role = _clean(c.get("role"), 50) or "Other"
+            cur.execute("SELECT 1 FROM CareContacts WHERE PatientID = ? AND IsPrimary = 1", patient_id)
+            make_primary = 1 if (role == "GP" and not cur.fetchone()) else 0
+            cur.execute(
+                "INSERT INTO CareContacts (PatientID, Role, Name, Phone, IsPrimary) VALUES (?, ?, ?, ?, ?)",
+                patient_id, role, name, _clean(c.get("phone"), 30), make_primary,
+            )
+            saved["care_contacts"] += 1
+
+        conn.commit()
+        return saved
+    finally:
+        conn.close()

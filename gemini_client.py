@@ -13,7 +13,6 @@ MODELS = [
     "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-3.5-flash",
-    "gemini-2.5-flash",
     "gemini-flash-latest",
 ]
 
@@ -39,3 +38,20 @@ def get_ai_response(prompt):
 if __name__ == "__main__":
     reply = get_ai_response("Say hello as if you're a caring healthcare assistant named Ana.")
     print(reply)
+
+    from google.genai import types
+
+def get_ai_response_with_file(prompt, data, mime_type):
+    """Same as get_ai_response, but also sends a PDF or photo for Gemini to read."""
+    global last_model_used
+    part = types.Part.from_bytes(data=data, mime_type=mime_type)
+    last_error = None
+    for model in MODELS:
+        try:
+            response = client.models.generate_content(model=model, contents=[part, prompt])
+            last_model_used = model
+            return response.text
+        except Exception as e:
+            last_error = e
+            print(f"[{model} failed: {e}]")
+    raise last_error

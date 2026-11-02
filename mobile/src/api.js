@@ -15,7 +15,8 @@ export function setUnauthorizedHandler(handler) {
 }
 
 async function request(path, options = {}) {
-  const headers = { 'Content-Type': 'application/json' };
+  // A file upload (FormData) sets its own Content-Type; everything else is JSON.
+  const headers = options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
 
   let res;
@@ -25,8 +26,7 @@ async function request(path, options = {}) {
     throw new Error("Can't reach Ana's server. Is the API running?");
   }
   const data = await res.json().catch(() => ({}));
-  // Any "not logged in" answer (except a wrong password on the login screen) → back to login.
-  if (res.status === 401 && path !== '/auth/login') onUnauthorized?.();
+  if (res.status === 401 && authToken) onUnauthorized?.();
   if (!res.ok) {
     throw new Error(data.detail || `Something went wrong (error ${res.status}).`);
   }
@@ -60,3 +60,27 @@ export const retryReply = (checkinId) =>
 
 export const endCheckin = (checkinId) =>
   request(`/checkins/${checkinId}/end`, { method: 'POST' });
+
+export const register = (fullName, email, password, dateOfBirth) =>
+  request('/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ full_name: fullName, email, password, date_of_birth: dateOfBirth }),
+  });
+
+// file = one result from expo-document-picker. On the web it has a real File object;
+// on a phone, React Native uploads it from its uri.
+export function uploadReport(patientId, file) {
+  const form = new FormData();
+  if (file.file) {
+    form.append('file', file.file, file.name);
+  } else {
+    form.append('file', { uri: file.uri, name: file.name, type: file.mimeType });
+  }
+  return request(`/patients/${patientId}/reports/extract`, { method: 'POST', body: form });
+}
+
+export const confirmReport = (patientId, records) =>
+  request(`/patients/${patientId}/reports/confirm`, {
+    method: 'POST',
+    body: JSON.stringify(records),
+  });

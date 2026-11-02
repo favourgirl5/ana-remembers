@@ -1,9 +1,26 @@
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import UploadScreen from './UploadScreen';
 import { isListeningSupported, speak } from './speech';
 import { colors, serif } from './theme';
 
-export default function SettingsScreen({ settings, onChange, profile, onLogout }) {
+export default function SettingsScreen({ settings, onChange, profile, onLogout, onRecordsUpdated }) {
   const canListen = isListeningSupported();
+  const [uploading, setUploading] = useState(false);
+
+  if (uploading) {
+    return (
+      <UploadScreen
+        patientId={profile?.patientId}
+        doneLabel="Back to settings"
+        skipLabel="Back to settings"
+        onDone={(changed) => {
+          setUploading(false);
+          if (changed) onRecordsUpdated?.(); // reload what Ana knows
+        }}
+      />
+    );
+  }
   const firstName = profile?.fullName?.split(' ')[0];
 
   function toggle(key) {
@@ -42,15 +59,18 @@ export default function SettingsScreen({ settings, onChange, profile, onLogout }
 
       {/* Medical records */}
       <Text style={styles.section}>Medical records</Text>
-      <View style={[styles.card, styles.disabled]}>
-        <View style={styles.titleRow}>
-          <Text style={styles.rowTitle}>Upload a medical report</Text>
-          <Text style={styles.badge}>Coming next</Text>
-        </View>
+      <View style={styles.card}>
+        <Text style={styles.rowTitle}>Upload a medical report</Text>
         <Text style={styles.rowDescription}>
           Add a PDF or photo of a report from your doctor or hospital. Ana will show you what she
           found, so you can check it before anything is saved.
         </Text>
+        <Pressable
+          style={({ pressed }) => [styles.testButton, pressed && styles.pressed]}
+          onPress={() => setUploading(true)}
+        >
+          <Text style={styles.testText}>📄  Upload a report</Text>
+        </Pressable>
       </View>
 
       {/* Talking with Ana */}

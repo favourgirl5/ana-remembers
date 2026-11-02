@@ -11,12 +11,15 @@ Docs: http://127.0.0.1:8000/docs
 import uuid
 from datetime import date, timedelta
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from auth import check_password, make_token, read_token
-from db import get_login, get_patient_context, get_session_dates, store_session, upsert_concerns
+from auth import check_password, hash_password, make_token, read_token
+from db import (create_patient, get_login, get_patient_context, get_session_dates,
+                save_extracted_records, store_session, upsert_concerns)
+from extraction import EXTRACT_PROMPT, parse_extraction
+from gemini_client import get_ai_response_with_file
 from escalation import higher, primary_contact, trend_escalation
 from main import ask_gemini, MAX_TURNS, EXIT_WORDS
 from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_response
@@ -36,6 +39,20 @@ CHECKINS = {}
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class RegisterRequest(BaseModel):
+    full_name: str
+    email: str
+    password: str
+    date_of_birth: str  # YYYY-MM-DD
+
+
+class ConfirmRecordsRequest(BaseModel):
+    diagnoses: list = []
+    medications: list = []
+    allergies: list = []
+    care_contacts: list = []
 
 
 class StartRequest(BaseModel):
@@ -73,6 +90,57 @@ def login(req: LoginRequest):
         "full_name": user["FullName"],
         "email": user["Email"],
     }
+
+
+@app.post("/auth/register")
+def register(req: RegisterRequest):
+    """Create a patient account and log in straight away."""
+    name = req.full_name.strip()
+    email = req.email.strip().lower()
+    if len(name) < 2:
+        raise HTTPException(status_code=400, detail="Please enter your full name.")
+    if "@" not in email or "." not in email:
+        raise HTTPException(status_code=400, detail="Please enter a valid email address.")
+    if len(req.password) < 8:
+        raise HTTPException(status_code=400, detail="Your password needs at least 8 characters.")
+    try:
+        dob = date.fromisoformat(req.date_of_birth.strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Please enter your date of birth as YYYY-MM-DD.")
+    if get_login(email):
+        raise HTTPException(status_code=409, detail="An account with this email already exists.")
+    patient_id = create_patient(name, email, hash_password(req.password), dob.isoformat())
+    return {"token": make_token(patient_id), "patient_id": patient_id, "full_name": name, "email": email}
+
+
+# ---------- Medical reports ----------
+
+REPORT_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
+MAX_REPORT_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+@app.post("/patients/{patient_id}/reports/extract")
+def extract_report(patient_id: int, file: UploadFile = File(...), me: int = Depends(current_patient)):
+    """Gemini reads the report and returns what it found. Nothing is saved yet,
+    and the file itself is never stored."""
+    _only_own(patient_id, me)
+    if file.content_type not in REPORT_TYPES:
+        raise HTTPException(status_code=400, detail="Please upload a PDF or a photo (JPG or PNG).")
+    data = file.file.read()
+    if len(data) > MAX_REPORT_BYTES:
+        raise HTTPException(status_code=413, detail="That file is too large (max 10 MB).")
+    try:
+        raw = get_ai_response_with_file(EXTRACT_PROMPT, data, file.content_type)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Ana couldn't read the report right now. Please try again later.")
+    return parse_extraction(raw)
+
+
+@app.post("/patients/{patient_id}/reports/confirm")
+def confirm_report(patient_id: int, req: ConfirmRecordsRequest, me: int = Depends(current_patient)):
+    """Save only the items the patient checked and kept."""
+    _only_own(patient_id, me)
+    return save_extracted_records(patient_id, req.model_dump())
 
 
 # ---------- Helpers ----------

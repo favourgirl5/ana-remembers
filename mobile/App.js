@@ -142,7 +142,8 @@ export default function App() {
                     <SettingsScreen
                       settings={settings}
                       onChange={changeSettings}
-                      profile={{ fullName: auth.fullName, email: auth.email, initials }}
+                      profile={{ fullName: auth.fullName, email: auth.email, initials, patientId: auth.patientId }}
+                      onRecordsUpdated={loadPatient}
                       onLogout={() => handleLogout()}
                     />
                   )}
