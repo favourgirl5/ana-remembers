@@ -266,6 +266,11 @@ def _date_or_none(value):
         return text
     return None
 
+def _name_key(text):
+    """'Dr. P. Hendriks, Huisartsenpraktijk De Berk (fictional)' -> 'dr. p. hendriks'.
+    Gemini doesn't write names identically every time, so compare only the core name."""
+    core = str(text or "").split(",")[0].split("(")[0]
+    return " ".join(core.lower().split())
 
 def save_extracted_records(patient_id, records):
     """Save the report items the patient confirmed. Skips items already in the record.
@@ -279,9 +284,8 @@ def save_extracted_records(patient_id, records):
             name = _clean(d.get("name"), 100)
             if not name:
                 continue
-            cur.execute("SELECT 1 FROM Diagnoses WHERE PatientID = ? AND DiagnosisName = ?",
-                        patient_id, name)
-            if cur.fetchone():
+            cur.execute("SELECT DiagnosisName FROM Diagnoses WHERE PatientID = ?", patient_id)
+            if any(_name_key(n) == _name_key(name) for (n,) in cur.fetchall()):
                 continue
             cur.execute(
                 "INSERT INTO Diagnoses (PatientID, DiagnosisName, DiagnosisDate, PresentingSymptoms) "
@@ -294,9 +298,8 @@ def save_extracted_records(patient_id, records):
             name = _clean(m.get("name"), 100)
             if not name:
                 continue
-            cur.execute("SELECT 1 FROM Medications WHERE PatientID = ? AND MedicationName = ?",
-                        patient_id, name)
-            if cur.fetchone():
+            cur.execute("SELECT MedicationName FROM Medications WHERE PatientID = ?", patient_id)
+            if any(_name_key(n) == _name_key(name) for (n,) in cur.fetchall()):
                 continue
             cur.execute(
                 "INSERT INTO Medications (PatientID, MedicationName, Dosage, Frequency, StartDate) "
@@ -323,9 +326,11 @@ def save_extracted_records(patient_id, records):
             name = _clean(c.get("name"), 150)
             if not name:
                 continue
-            cur.execute("SELECT 1 FROM CareContacts WHERE PatientID = ? AND Name = ?", patient_id, name)
-            if cur.fetchone():
-                continue
+            phone = _clean(c.get("phone"), 30)
+            cur.execute("SELECT Name, Phone FROM CareContacts WHERE PatientID = ?", patient_id)
+            if any(_name_key(n) == _name_key(name) or (phone and p == phone)
+                   for n, p in cur.fetchall()):
+                continue  # same person, even if Gemini wrote the name differently
             role = _clean(c.get("role"), 50) or "Other"
             cur.execute("SELECT 1 FROM CareContacts WHERE PatientID = ? AND IsPrimary = 1", patient_id)
             make_primary = 1 if (role == "GP" and not cur.fetchone()) else 0
