@@ -131,7 +131,8 @@ def extract_report(patient_id: int, file: UploadFile = File(...), me: int = Depe
         raise HTTPException(status_code=413, detail="That file is too large (max 10 MB).")
     try:
         raw = get_ai_response_with_file(EXTRACT_PROMPT, data, file.content_type)
-    except Exception:
+    except Exception as e:
+        print(f"[Report extraction failed: {type(e).__name__}: {e}]")
         raise HTTPException(status_code=503, detail="Ana couldn't read the report right now. Please try again later.")
     return parse_extraction(raw)
 
@@ -187,7 +188,7 @@ def _ana_turn(checkin_id, c):
     last_turn = c["turns"] >= MAX_TURNS or last_message.lower().strip(" .!") in EXIT_WORDS
     try:
         raw = ask_gemini(build_summary_prompt(c["ctx"], c["transcript"], last_turn=last_turn))
-    except Exception:
+    except Exception as e:
         raise HTTPException(
             status_code=503,
             detail="Ana couldn't reach her server. Your message is safe; you can try again.",
