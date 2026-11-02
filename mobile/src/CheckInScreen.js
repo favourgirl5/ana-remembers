@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -20,8 +21,35 @@ const QUICK_REPLIES = ['Yes, all done', 'Not yet', 'I forgot'];
 const MEDICATION_QUESTION = /(take|taken|took|had)\b[^?]*\b(medic|pill|tablet|dose)[^?]*\?/i;
 const SHOW_MEDS_AFTER = ['Not yet', 'I forgot'];
 
+// Ana's message mentions calling someone -> show tap-to-call buttons instead of reading numbers.
+const CALL_WORDS = /\b(call|ring|phone|contact)\b|112/i;
+
+function contactsToShow(text, contacts) {
+  const t = text.toLowerCase();
+  const withPhone = (contacts || []).filter((c) => c.Phone);
+  const mentioned = withPhone.filter(
+    (c) =>
+      t.includes(c.Role.toLowerCase()) ||
+      c.Name.toLowerCase()
+        .split(/[\s,().]+/)
+        .some((word) => word.length > 3 && t.includes(word))
+  );
+  // Prefer the most specific match: "out-of-hours GP" should not also show the regular GP.
+  const specific = mentioned.filter(
+    (c) => !mentioned.some((d) => d !== c && d.Role.toLowerCase().includes(c.Role.toLowerCase()))
+  );
+  if (specific.length) return specific;
+  const primary = withPhone.find((c) => c.IsPrimary);
+  return primary && /\b(gp|doctor|practice)\b/i.test(text) ? [primary] : [];
+}
+
+function callNumber(phone) {
+  Linking.openURL(`tel:${phone.replace(/[^\d+]/g, '')}`).catch(() => {});
+}
+
 function greetingFor(date) {
   const hour = date.getHours();
+  if (hour < 5) return 'Hello';
   if (hour < 12) return 'Good morning';
   if (hour < 18) return 'Good afternoon';
   return 'Good evening';
@@ -112,6 +140,9 @@ export default function CheckInScreen({ patient, settings }) {
     .toUpperCase();
 
   const lastMessage = messages[messages.length - 1];
+  const showCalls = !busy && lastMessage?.from === 'ana' && CALL_WORDS.test(lastMessage.text);
+  const callContacts = showCalls ? contactsToShow(lastMessage.text, patient.care_contacts) : [];
+  const showEmergencyCall = showCalls && /112/.test(lastMessage.text);
   const showQuickReplies =
     status === 'chatting' &&
     !busy &&
@@ -209,7 +240,7 @@ export default function CheckInScreen({ patient, settings }) {
       <ScrollView
         ref={scrollRef}
         style={styles.flex}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, status === 'idle' && styles.contentIdle]}
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: true })}
       >
@@ -221,17 +252,21 @@ export default function CheckInScreen({ patient, settings }) {
         <Text style={styles.subtitle}>Let's take a quiet moment to check in.</Text>
 
         {status === 'idle' && (
-          <Pressable
-            style={({ pressed }) => [styles.startButton, pressed && styles.pressed]}
-            onPress={handleStart}
-            disabled={busy}
-          >
-            {busy ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.startText}>Start today's check-in</Text>
-            )}
-          </Pressable>
+          <View style={styles.idleBox}>
+            <Text style={styles.readyTitle}>Ready when you are.</Text>
+            <Text style={styles.readyText}>Ana will ask a few short questions, one at a time.</Text>
+            <Pressable
+              style={({ pressed }) => [styles.startButton, styles.startWide, pressed && styles.pressed]}
+              onPress={handleStart}
+              disabled={busy}
+            >
+              {busy ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.startText}>Start today's check-in</Text>
+              )}
+            </Pressable>
+          </View>
         )}
 
         {messages.map((m, i) =>
@@ -242,6 +277,29 @@ export default function CheckInScreen({ patient, settings }) {
               <Text style={styles.patientText}>{m.text}</Text>
             </View>
           )
+        )}
+
+        {(showEmergencyCall || callContacts.length > 0) && (
+          <View style={styles.callBox}>
+            {showEmergencyCall && (
+              <Pressable
+                style={({ pressed }) => [styles.callButton, styles.callEmergency, pressed && styles.pressed]}
+                onPress={() => callNumber('112')}
+              >
+                <Text style={styles.callEmergencyText}>📞  Call 112 (emergency)</Text>
+              </Pressable>
+            )}
+            {callContacts.map((contact) => (
+              <Pressable
+                key={contact.Name}
+                style={({ pressed }) => [styles.callButton, pressed && styles.pressed]}
+                onPress={() => callNumber(contact.Phone)}
+              >
+                <Text style={styles.callText}>📞  {contact.Name}</Text>
+                <Text style={styles.callRole}>{contact.Role}</Text>
+              </Pressable>
+            ))}
+          </View>
         )}
 
         {busy && status !== 'idle' && (
@@ -394,6 +452,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   startText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  contentIdle: { flexGrow: 1 },
+  idleBox: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 40 },
+  readyTitle: { fontFamily: serif, fontSize: 22, color: colors.text, textAlign: 'center' },
+  readyText: { fontSize: 14, color: colors.muted, textAlign: 'center', marginTop: 6, marginBottom: 20 },
+  startWide: { alignSelf: 'stretch' },
+
+  callBox: { marginLeft: 38, gap: 8, marginBottom: 14 },
+  callButton: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  callText: { fontSize: 15, color: colors.primary, fontWeight: '600' },
+  callRole: { fontSize: 12, color: colors.muted, marginTop: 2 },
+  callEmergency: { backgroundColor: colors.error, borderColor: colors.error },
+  callEmergencyText: { fontSize: 15, color: '#fff', fontWeight: '700' },
   againButton: { marginTop: 16 },
 
   anaRow: { flexDirection: 'row', gap: 10, marginBottom: 14, alignItems: 'flex-start' },
