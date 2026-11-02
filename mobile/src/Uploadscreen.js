@@ -167,7 +167,7 @@ export default function UploadScreen({ patientId, onDone, doneLabel = 'Done', sk
 }
 
 const styles = StyleSheet.create({
-  content: { padding: 24, paddingTop: 32 },
+  content: { padding: 24, flexGrow: 1, justifyContent: 'center' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, minHeight: 320 },
   heading: { fontFamily: serif, fontSize: 24, color: colors.text, marginBottom: 10, textAlign: 'center' },
   body: { fontSize: 14, color: colors.muted, lineHeight: 20, marginBottom: 18, textAlign: 'center' },
