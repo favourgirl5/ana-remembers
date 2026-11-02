@@ -11,16 +11,29 @@ PATIENT_ID = 1  # change to a PatientID that exists
  
  
 def ask_gemini(prompt, attempts=2):
-    """Call Gemini, waiting and retrying if the model is busy (e.g. 503 errors)."""
+    """Call Gemini, waiting and retrying if the model is busy (e.g. 503 errors).
+    Every call is logged to gemini_log.csv for the availability/response-time benchmark."""
+    start = time.time()
     for attempt in range(1, attempts + 1):
         try:
-            return get_ai_response(prompt)
+            text = get_ai_response(prompt)
+            _log_call(start, "ok", "")
+            return text
         except Exception as e:
             if attempt == attempts or "429" in str(e):   # quota used up: retrying won't help
+                _log_call(start, "failed", str(e)[:60])
                 raise
-            wait = 2 ** attempt  # 2, 4, 8 seconds
+            wait = 2 ** attempt
             print(f"[Gemini busy ({type(e).__name__}), retrying in {wait}s...]")
             time.sleep(wait)
+
+
+def _log_call(start, result, error):
+    import csv, datetime, gemini_client
+    with open("gemini_log.csv", "a", newline="") as f:
+        csv.writer(f).writerow([datetime.datetime.now().isoformat(timespec="seconds"), result,
+                                round(time.time() - start, 1),
+                                getattr(gemini_client, "last_model_used", ""), error]) 
  
  
 MAX_TURNS = 10                      # patient replies per check-in

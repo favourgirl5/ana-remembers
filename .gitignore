@@ -4,3 +4,4 @@ __pycache__/
 *.ipynb
 .vscode/
 unsaved_sessions.jsonl
+gemini_log.csv
