@@ -84,13 +84,22 @@ def get_patient_context(patient_id, recent_sessions=5):
         sessions = _rows_to_dicts(cur)
 
         cur.execute(
-            "SELECT Concern, Category, Trend, FirstMentioned, LastUpdated, Notes, "
+            "SELECT Concern, Category, Status, Trend, FirstMentioned, LastUpdated, Notes, "
             "WorseCount, WorseSince "
-            "FROM PatientConcerns WHERE PatientID = ? AND Status = 'open' "
+            "FROM PatientConcerns WHERE PatientID = ? AND Status IN ('open', 'improving') "
             "ORDER BY LastUpdated DESC",
             patient_id,
         )
         concerns = _rows_to_dicts(cur)
+
+        # v3: concerns closed in the last 90 days, so Ana notices when one comes back
+        cur.execute(
+            "SELECT Concern, Category, FirstMentioned, LastUpdated, Notes, ResolvedBy "
+            "FROM PatientConcerns WHERE PatientID = ? AND Status = 'resolved' "
+            "AND LastUpdated >= DATEADD(DAY, -90, GETDATE()) ORDER BY LastUpdated DESC",
+            patient_id,
+        )
+        resolved = _rows_to_dicts(cur)
 
         cur.execute(
             "SELECT Role, Name, Phone, IsPrimary "
@@ -101,6 +110,7 @@ def get_patient_context(patient_id, recent_sessions=5):
 
         return {
             "open_concerns": concerns,
+            "resolved_concerns": resolved,
             "care_contacts": contacts,
             "patient": patient[0],
             "diagnoses": diagnoses,
@@ -179,8 +189,14 @@ def set_password_hash(patient_id, password_hash):
 def upsert_concerns(patient_id, concerns):
     """Update the patient's ongoing-concerns list after a check-in.
 
-    WorseCount / WorseSince track how long a concern has been getting worse:
-    'worse' adds one (and starts the clock); 'same', 'better' or resolved resets it.
+    "Model judges, code acts":
+    - Getting worse: 'worse' adds 1 to WorseCount (the trend rule escalates at 3 over 21 days).
+    - Getting better: Gemini can't close a concern on the patient's word alone. 'better' or
+      'resolved' only marks it 'improving' and adds 1 to BetterCount. Python closes it after
+      3 check-ins in a row over 14+ days (ResolvedBy = 'auto'), or a clinician closes it
+      (ResolvedBy = 'clinician', see close_concern_by_clinician).
+    - If it is 'same' or 'worse' again, it goes back to 'open' and BetterCount resets.
+    - A resolved concern that comes back is reopened (same name), so its history stays.
     """
     if not concerns:
         return
@@ -191,50 +207,95 @@ def upsert_concerns(patient_id, concerns):
             name = str(item.get("concern", "")).strip()[:200]
             if not name:
                 continue
-            status = "resolved" if item.get("status") == "resolved" else "open"
+            said_gone = item.get("status") == "resolved"
             trend = (str(item.get("trend") or "").strip()[:20]) or None
             category = (str(item.get("category") or "other").strip()[:30]) or "other"
             note = (str(item.get("note") or "").strip()[:500]) or None
+            getting_better = said_gone or trend == "better"
+            getting_worse = trend in ("worse", "returned", "new")
+
             cur.execute(
-                "SELECT ConcernID FROM PatientConcerns WHERE PatientID = ? AND Concern = ?",
+                "SELECT ConcernID, Status FROM PatientConcerns WHERE PatientID = ? AND Concern = ?",
                 patient_id, name,
             )
             row = cur.fetchone()
-            is_worse = trend == "worse" and status == "open"
-            resets = status == "resolved" or trend in ("same", "better")
-            if row:
+            if not row:
                 cur.execute(
-                    "UPDATE PatientConcerns SET Status = ?, Trend = COALESCE(?, Trend), "
-                    "Notes = COALESCE(?, Notes), LastUpdated = SYSDATETIME() WHERE ConcernID = ?",
-                    status, trend, note, row[0],
+                    "INSERT INTO PatientConcerns (PatientID, Concern, Category, Status, Trend, "
+                    "FirstMentioned, LastUpdated, Notes, WorseCount, WorseSince, BetterCount) "
+                    "VALUES (?, ?, ?, 'open', ?, SYSDATETIME(), SYSDATETIME(), ?, ?, "
+                    "CASE WHEN ? = 1 THEN SYSDATETIME() END, 0)",
+                    patient_id, name, category, trend, note,
+                    1 if trend == "worse" else 0, 1 if trend == "worse" else 0,
                 )
-                if is_worse:
+                continue
+
+            concern_id, status = row
+            cur.execute(
+                "UPDATE PatientConcerns SET Trend = COALESCE(?, Trend), Notes = COALESCE(?, Notes), "
+                "LastUpdated = SYSDATETIME() WHERE ConcernID = ?",
+                trend, note, concern_id,
+            )
+
+            if getting_better:
+                # Patient says better/gone: 'improving', never closed on their word alone
+                cur.execute(
+                    "UPDATE PatientConcerns SET Status = 'improving', BetterCount = BetterCount + 1, "
+                    "BetterSince = COALESCE(BetterSince, SYSDATETIME()), WorseCount = 0, "
+                    "WorseSince = NULL WHERE ConcernID = ? AND Status <> 'resolved'",
+                    concern_id,
+                )
+                # Python closes it: better in 3 check-ins in a row, over at least 14 days
+                cur.execute(
+                    "UPDATE PatientConcerns SET Status = 'resolved', ResolvedBy = 'auto' "
+                    "WHERE ConcernID = ? AND Status = 'improving' AND BetterCount >= ? "
+                    "AND DATEDIFF(DAY, BetterSince, SYSDATETIME()) >= ?",
+                    concern_id, CLOSE_MIN_COUNT, CLOSE_MIN_DAYS,
+                )
+            else:
+                # Mentioned and not better: (re)open it; a resolved concern that returns is reopened
+                cur.execute(
+                    "UPDATE PatientConcerns SET Status = 'open', BetterCount = 0, BetterSince = NULL, "
+                    "ResolvedBy = NULL WHERE ConcernID = ?",
+                    concern_id,
+                )
+                if trend == "worse":
                     cur.execute(
                         "UPDATE PatientConcerns SET WorseCount = WorseCount + 1, "
                         "WorseSince = COALESCE(WorseSince, SYSDATETIME()) WHERE ConcernID = ?",
-                        row[0],
+                        concern_id,
                     )
-                elif resets:
+                elif trend == "same":
                     cur.execute(
                         "UPDATE PatientConcerns SET WorseCount = 0, WorseSince = NULL "
                         "WHERE ConcernID = ?",
-                        row[0],
+                        concern_id,
                     )
-                # 'unknown' / no trend: leave the counter as it is
-            else:
-                cur.execute(
-                    "INSERT INTO PatientConcerns (PatientID, Concern, Category, Status, Trend, "
-                    "FirstMentioned, LastUpdated, Notes, WorseCount, WorseSince) "
-                    "VALUES (?, ?, ?, ?, ?, SYSDATETIME(), SYSDATETIME(), ?, ?, "
-                    "CASE WHEN ? = 1 THEN SYSDATETIME() END)",
-                    patient_id, name, category, status, trend, note,
-                    1 if is_worse else 0, 1 if is_worse else 0,
-                )
+                # 'unknown' / 'returned' / no trend: leave the worse counter as it is
         conn.commit()
     finally:
         conn.close()
 
 
+CLOSE_MIN_COUNT = 3   # better/gone in at least this many check-ins in a row...
+CLOSE_MIN_DAYS = 14   # ...over at least this many days
+
+
+def close_concern_by_clinician(patient_id, concern):
+    """A GP or nurse confirms a concern is resolved (e.g. after a visit or a report)."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE PatientConcerns SET Status = 'resolved', ResolvedBy = 'clinician', "
+            "LastUpdated = SYSDATETIME() WHERE PatientID = ? AND Concern = ?",
+            patient_id, concern,
+        )
+        conn.commit()
+        return cur.rowcount
+    finally:
+        conn.close()
+        
 # ---------- Registration and medical reports ----------
 
 def create_patient(full_name, email, password_hash, date_of_birth, baseline_weight_kg=None):

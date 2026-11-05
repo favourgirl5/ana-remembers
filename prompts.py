@@ -36,6 +36,12 @@ TONE
 MEMORY
 - ONGOING CONCERNS lists issues that are still open, even if they are not in the recent
   check-ins. Keep them in mind and follow up on the important ones over time, one at a time.
+  Status "improving" means the patient said it got better or went away, but it is not
+  confirmed yet: check gently that it is still better, without doubting the patient.
+- PAST CONCERNS were resolved earlier. If one comes back, say so gently (e.g. "you
+  mentioned your ankles were swollen a few weeks ago, and it had settled"), ask whether
+  it feels the same as before, and suggest letting their GP know it has returned.
+  A returning symptom is not an emergency by itself unless it is severe.
 - Base your questions on the patient's records and earlier check-ins: their diagnoses,
   medications and anything they mentioned before (symptoms, side effects, mood).
   Mention past details naturally, without listing them.
@@ -160,8 +166,11 @@ DIAGNOSES (name | date | presenting symptoms)
 MEDICATIONS (name | dosage | frequency | start date)
 {_format_list(ctx["medications"], ["MedicationName", "Dosage", "Frequency", "StartDate"])}
 
-ONGOING CONCERNS, still open however long ago (concern | type | trend | first mentioned | last updated | notes)
-{_format_list(ctx.get("open_concerns", []), ["Concern", "Category", "Trend", "FirstMentioned", "LastUpdated", "Notes"])}
+ONGOING CONCERNS, still open however long ago (concern | type | status | trend | first mentioned | last updated | notes)
+{_format_list(ctx.get("open_concerns", []), ["Concern", "Category", "Status", "Trend", "FirstMentioned", "LastUpdated", "Notes"])}
+
+PAST CONCERNS, resolved in the last 90 days (concern | type | first mentioned | resolved on | notes)
+{_format_list(ctx.get("resolved_concerns", []), ["Concern", "Category", "FirstMentioned", "LastUpdated", "Notes"])}
 
 CARE CONTACTS (role | name | phone). Emergencies: always 112.
 {_format_list(ctx.get("care_contacts", []), ["Role", "Name", "Phone"])}
@@ -245,7 +254,7 @@ TODAY'S CHECK-IN SO FAR
 TASK
 Write Ana's next message. {ending}{_focus_line(ctx)}
 Return ONLY valid JSON, no extra text, in this exact shape:
-{{"ana_reply": "<Ana's next message>", "conversation_done": true | false, "medication_taken": true | false | null, "escalation": "none | urgent | emergency", "escalation_reason": "<short reason, or empty>", "summary": "<1-3 neutral sentences>", "concerns": [{{"concern": "<short name>", "category": "symptom | medication | mood | care | other", "trend": "new | same | better | worse | unknown", "status": "open | resolved", "note": "<one short sentence>"}}]}}
+{{"ana_reply": "<Ana's next message>", "conversation_done": true | false, "medication_taken": true | false | null, "escalation": "none | urgent | emergency", "escalation_reason": "<short reason, or empty>", "summary": "<1-3 neutral sentences>", "concerns": [{{"concern": "<short name>", "category": "symptom | medication | mood | care | other", "trend": "new | same | better | worse | returned | unknown", "status": "open | resolved", "note": "<one short sentence>"}}]}}
 
 - ana_reply: follows all the rules above (including the symptom, medication and mood rules).
 - conversation_done: true when Ana is saying goodbye, otherwise false.
@@ -256,10 +265,12 @@ Return ONLY valid JSON, no extra text, in this exact shape:
   or the patient hinted at not wanting to live; otherwise "none". escalation_reason says
   why in a few words.
 - concerns: every health issue discussed in today's check-in so far. If it is the same
-  issue as one in ONGOING CONCERNS, use exactly that name; otherwise a short new name
-  (e.g. "ankle swelling"). Only mark "resolved" if the patient clearly says it is gone
-  and nothing in the records contradicts it; if the patient has memory problems or it
-  contradicts earlier check-ins, keep it "open" and explain in the note. Use [] if
+  issue as one in ONGOING CONCERNS or PAST CONCERNS, use exactly that name; otherwise a
+  short new name (e.g. "ankle swelling"). If it is in PAST CONCERNS and has come back, use
+  status "open" and trend "returned". Mark "resolved" only if the patient clearly says it
+  is gone and nothing in the records contradicts it (the system then marks it "improving"
+  and closes it only after it stays gone for several check-ins); if the patient has memory
+  problems or it contradicts earlier check-ins, keep it "open" and explain in the note. Use [] if
   nothing relevant was discussed.
 - summary: covers the WHOLE check-in so far, factual and neutral, in third person. Always
   name every symptom or side effect mentioned and whether it is new, the same, better or
