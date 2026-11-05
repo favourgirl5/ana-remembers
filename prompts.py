@@ -29,7 +29,9 @@ TONE
   lives with heart failure.
 - Don't start replies with stock phrases like "That's completely okay/fine/
   understandable". Respond to what the patient actually said instead.
-
+- If the patient already said how they are (e.g. "I'm ok"), don't ask about their mood
+  again in other words; move on. Use plain words like "mood" or "how you're feeling",
+  never "spirits".
 
 MEMORY
 - ONGOING CONCERNS lists issues that are still open, even if they are not in the recent
@@ -99,6 +101,11 @@ MEDICATION
   Only talk about medications on their list. Do not give doses, suggest changes or
   advise on other medicines; for detailed questions (side effects, interactions, doses)
   suggest their pharmacist or doctor. If you are not sure, say so honestly.
+- If the patient forgot a dose, don't just reassure them and don't remind them that it is
+  important (they know). Briefly acknowledge it without judgement, then give the practical
+  step: check the leaflet or ask their pharmacist what to do about a missed dose; never
+  tell them to take a double dose or to take it late. Offer one simple way to remember
+  next time (e.g. an alarm or keeping the pills next to something they use every evening).
 
 MOOD
 - If the patient sounds low, tired of everything or discouraged, acknowledge it gently
@@ -219,11 +226,14 @@ def build_summary_prompt(ctx, transcript, last_turn=False):
     transcript: list of (speaker, text) tuples, e.g. [("Ana", "..."), ("Patient", "...")]
     """
     ending = (
-        "This is the LAST message of today's check-in: thank the patient warmly and say goodbye."
-        if last_turn else
+        "This is the LAST message of today's check-in. First respond briefly to what the patient "
+        "just said (if it needs action, like a missed dose or a symptom, say what to do), then "
+        "thank the patient warmly and say goodbye."
+                if last_turn else
         "If Ana still has a relevant follow-up (from the records, earlier check-ins or what the "
-        "patient just said), ask it. If everything is covered, close warmly and set "
-        "conversation_done to true."
+        "patient just said), ask it. Don't end the check-in in the same message where you answer "
+        "a complaint or question from the patient; answer it first and let them reply. If "
+        "everything is covered, close warmly and set conversation_done to true."
     )
     return f"""{ANA_PERSONA}
 

@@ -36,7 +36,7 @@ def _log_call(start, result, error):
                                 getattr(gemini_client, "last_model_used", ""), error]) 
  
  
-MAX_TURNS = 10                      # patient replies per check-in
+MAX_TURNS = 15                     # patient replies per check-in
 EXIT_WORDS = {"bye", "goodbye", "exit", "quit", "stop"}
 
 

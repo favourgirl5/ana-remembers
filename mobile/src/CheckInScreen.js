@@ -140,9 +140,14 @@ export default function CheckInScreen({ patient, settings }) {
     .toUpperCase();
 
   const lastMessage = messages[messages.length - 1];
-  const showCalls = !busy && lastMessage?.from === 'ana' && CALL_WORDS.test(lastMessage.text);
-  const callContacts = showCalls ? contactsToShow(lastMessage.text, patient.care_contacts) : [];
-  const showEmergencyCall = showCalls && /112/.test(lastMessage.text);
+   // Once Ana recommends calling someone, keep the button for the rest of this check-in.
+  const callMessages = messages.filter((m) => m.from === 'ana' && CALL_WORDS.test(m.text));
+  const callContacts = [
+    ...new Map(
+      callMessages.flatMap((m) => contactsToShow(m.text, patient.care_contacts)).map((c) => [c.Name, c])
+    ).values(),
+  ];
+  const showEmergencyCall = callMessages.some((m) => /112/.test(m.text));
   const showQuickReplies =
     status === 'chatting' &&
     !busy &&
