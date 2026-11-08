@@ -296,6 +296,23 @@ def close_concern_by_clinician(patient_id, concern):
     finally:
         conn.close()
 
+# ---------- Monitoring ----------
+
+def log_ai_call(call_time, result, seconds, model, error, prompt_tokens, source="live",
+                patient_id=None, call_type=None):
+    """One row per AI call, for the monitoring report (Power BI)."""
+    conn = get_connection()
+    try:
+        conn.cursor().execute(
+            "INSERT INTO AiCalls (CallTime, Result, Seconds, Model, Error, PromptTokens, Source, "
+            "PatientID, CallType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            call_time, result, seconds, model or None, (error or None) and error[:200], prompt_tokens, source,
+            patient_id, call_type,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+        
 # ---------- Semantic search (memory v3) ----------
 
 def get_concerns_for_search(patient_id):

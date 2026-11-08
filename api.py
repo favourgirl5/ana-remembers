@@ -23,6 +23,9 @@ from gemini_client import get_ai_response_with_file
 from escalation import higher, primary_contact, trend_escalation
 from main import ask_gemini, MAX_TURNS, EXIT_WORDS
 from semantic import find_related
+from monitoring import get_metrics
+from fastapi.responses import HTMLResponse
+import os
 from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_response
 
 app = FastAPI(title="Ana Remembers API")
@@ -189,7 +192,8 @@ def _ana_turn(checkin_id, c):
     last_turn = c["turns"] >= MAX_TURNS or last_message.lower().strip(" .!") in EXIT_WORDS
     _add_related_memory(c, last_message)
     try:
-        raw = ask_gemini(build_summary_prompt(c["ctx"], c["transcript"], last_turn=last_turn))
+        raw = ask_gemini(build_summary_prompt(c["ctx"], c["transcript"], last_turn=last_turn),
+                           patient_id=c["patient_id"], call_type="reply")
     except Exception as e:
         raise HTTPException(
             status_code=503,
@@ -295,7 +299,8 @@ def start_checkin(req: StartRequest, me: int = Depends(current_patient)):
     if ctx is None:
         raise HTTPException(status_code=404, detail="Patient not found")
     try:
-        ana_message = ask_gemini(build_checkin_prompt(ctx)).strip()
+        ana_message = ask_gemini(build_checkin_prompt(ctx), patient_id=req.patient_id,
+                                   call_type="opening").strip()
     except Exception:
         raise HTTPException(status_code=503, detail="Ana can't connect right now. Please try again later.")
 
@@ -345,3 +350,23 @@ def end_checkin(checkin_id: str, me: int = Depends(current_patient)):
     """Patient closes the chat early: save what we have. No Gemini call."""
     _own_checkin(checkin_id, me)
     return {"session_id": _save_checkin(checkin_id)}
+
+   # ---------- Monitoring (Managing & Controlling) ----------
+
+def _check_admin(key):
+       expected = os.getenv("ADMIN_KEY")
+       if not expected or key != expected:
+           raise HTTPException(status_code=403, detail="Monitoring needs the admin key (ADMIN_KEY in .env).")
+
+
+@app.get("/monitoring", response_class=HTMLResponse)
+def monitoring_page():
+       """Dashboard for the care team / developer. Open: /monitoring?key=<ADMIN_KEY>"""
+       with open("monitoring.html", encoding="utf-8") as f:
+           return f.read()
+
+
+@app.get("/monitoring/metrics")
+def monitoring_metrics(key: str = "", days: int = 30):
+       _check_admin(key)
+       return get_metrics(max(1, min(days, 365)))

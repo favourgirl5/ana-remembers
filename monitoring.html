@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ana Monitoring</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --text:#1d2b33; --muted:#6b7780; --ok:#2e7d4f; --bad:#c0392b; --none:#8c96a0; --line:#438dd5; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family:'Segoe UI', Arial, sans-serif; }
+  header { padding:20px 24px 8px; }
+  h1 { margin:0; font-size:22px; }
+  .sub { color:var(--muted); font-size:13px; margin-top:4px; }
+  .bar { display:flex; gap:10px; align-items:center; padding:8px 24px; flex-wrap:wrap; }
+  select, button { font:inherit; padding:6px 10px; border:1px solid #c9d2db; border-radius:8px; background:#fff; }
+  main { padding:8px 24px 32px; display:grid; gap:16px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:12px; }
+  .card { background:var(--card); border-radius:14px; padding:16px; box-shadow:0 1px 2px rgba(0,0,0,.05); }
+  .kpi .label { font-size:12px; color:var(--muted); }
+  .kpi .value { font-size:28px; font-weight:700; margin:6px 0 2px; }
+  .kpi .target { font-size:12px; color:var(--muted); }
+  .pill { display:inline-block; font-size:11px; font-weight:700; padding:2px 8px; border-radius:20px; color:#fff; margin-top:6px; }
+  .met { background:var(--ok); } .notmet { background:var(--bad); } .nodata { background:var(--none); }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:16px; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  td, th { text-align:left; padding:6px 4px; border-bottom:1px solid #eef1f4; }
+  .muted { color:var(--muted); font-size:12px; }
+  .error { color:var(--bad); padding:24px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ana Remembers: monitoring</h1>
+  <div class="sub">Live quality indicators compared with their targets. For the care team and developer, not for patients.</div>
+</header>
+<div class="bar">
+  <label>Period
+    <select id="days">
+      <option value="7">last 7 days</option>
+      <option value="30" selected>last 30 days</option>
+      <option value="90">last 90 days</option>
+    </select>
+  </label>
+  <button id="refresh">Refresh</button>
+  <span class="muted" id="generated"></span>
+</div>
+<main id="main"><div class="muted">Loading…</div></main>
+
+<script>
+const key = new URLSearchParams(location.search).get('key') || '';
+const fmt = (k, v) => v === null || v === undefined ? '–' : (k.endsWith('pct') ? v + '%' : v + ' s');
+let charts = [];
+
+async function load() {
+  const days = document.getElementById('days').value;
+  const main = document.getElementById('main');
+  let data;
+  try {
+    const res = await fetch(`/monitoring/metrics?days=${days}&key=${encodeURIComponent(key)}`);
+    data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+  } catch (e) {
+    main.innerHTML = `<div class="error">Could not load metrics: ${e.message}</div>`;
+    return;
+  }
+  document.getElementById('generated').textContent =
+    `Updated ${data.generated.replace('T', ' ')} · ${data.gemini_calls} Gemini calls · ${data.checkins_total} check-ins`;
+
+  const kpiCards = data.kpis.map(k => {
+    const cls = k.status === 'met' ? 'met' : k.status === 'not met' ? 'notmet' : 'nodata';
+    const sign = k.direction === 'higher' ? '≥' : '≤';
+    return `<div class="card kpi"><div class="label">${k.label}</div>
+      <div class="value">${fmt(k.key, k.value)}</div>
+      <div class="target">target ${sign} ${fmt(k.key, k.target)}</div>
+      <span class="pill ${cls}">${k.status}</span></div>`;
+  }).join('');
+
+  const models = Object.entries(data.by_model).map(([m, v]) =>
+    `<tr><td>${m}</td><td>${v.calls}</td><td>${v.failed}</td></tr>`).join('') || '<tr><td colspan="3" class="muted">No calls in this period</td></tr>';
+  const esc = ['emergency', 'urgent'].map(l => `<tr><td>${l}</td><td>${data.escalations[l] || 0}</td></tr>`).join('');
+  const conc = ['open', 'improving', 'resolved', 'returned'].map(s =>
+    `<tr><td>${s}</td><td>${data.concerns[s] || 0}</td></tr>`).join('');
+
+  main.innerHTML = `
+    <section class="kpis">${kpiCards}</section>
+    <section class="grid2">
+      <div class="card"><h2>Availability per day (%)</h2><canvas id="avail"></canvas></div>
+      <div class="card"><h2>Median response time per day (seconds)</h2><canvas id="speed"></canvas></div>
+    </section>
+    <section class="grid2">
+      <div class="card"><h2>Check-ins per day</h2><canvas id="checkins"></canvas></div>
+      <div class="card"><h2>Calls per model</h2><table><tr><th>Model</th><th>Calls</th><th>Failed</th></tr>${models}</table></div>
+    </section>
+    <section class="grid2">
+      <div class="card"><h2>Escalations saved</h2><table>${esc}</table></div>
+      <div class="card"><h2>Concerns (memory)</h2><table>${conc}</table>
+        <p class="muted">"returned" = a resolved symptom that came back (memory v3).</p></div>
+    </section>
+    <section class="card"><h2>Not measured live</h2>
+      <ul class="muted">${data.not_live.map(t => `<li>${t}</li>`).join('')}</ul></section>`;
+
+  charts.forEach(c => c.destroy()); charts = [];
+  const line = (id, labels, values, target, color) => charts.push(new Chart(document.getElementById(id), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: id, data: values, borderColor: color, backgroundColor: color, tension: .2 },
+      ...(target !== null ? [{ label: 'target', data: labels.map(() => target), borderColor: '#c0392b', borderDash: [6, 4], pointRadius: 0 }] : [])
+    ]},
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  }));
+  const days_ = data.daily.map(d => d.day);
+  line('avail', days_, data.daily.map(d => d.availability_pct), 99, '#438dd5');
+  line('speed', days_, data.daily.map(d => d.median_seconds), 5, '#438dd5');
+  charts.push(new Chart(document.getElementById('checkins'), {
+    type: 'bar',
+    data: { labels: data.checkins_per_day.map(d => d.day), datasets: [{ data: data.checkins_per_day.map(d => d.checkins), backgroundColor: '#438dd5' }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } }
+  }));
+}
+document.getElementById('refresh').onclick = load;
+document.getElementById('days').onchange = load;
+load();
+setInterval(load, 60000);  // refresh every minute
+</script>
+</body>
+</html>

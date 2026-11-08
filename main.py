@@ -10,31 +10,35 @@ from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_re
 PATIENT_ID = 1  # change to a PatientID that exists
  
  
-def ask_gemini(prompt, attempts=2):
+def ask_gemini(prompt, attempts=2, patient_id=None, call_type=None):
     """Call Gemini, waiting and retrying if the model is busy (e.g. 503 errors).
-    Every call is logged to gemini_log.csv for the availability/response-time benchmark."""
+    Every call is logged for the monitoring report."""
     start = time.time()
     for attempt in range(1, attempts + 1):
         try:
             text = get_ai_response(prompt)
-            _log_call(start, "ok", "")
+            _log_call(start, "ok", "", prompt, patient_id, call_type)
             return text
         except Exception as e:
             if attempt == attempts or "429" in str(e):   # quota used up: retrying won't help
-                _log_call(start, "failed", str(e)[:60])
-                raise
+                _log_call(start, "failed", str(e)[:60], prompt, patient_id, call_type)
             wait = 2 ** attempt
             print(f"[Gemini busy ({type(e).__name__}), retrying in {wait}s...]")
             time.sleep(wait)
 
 
-def _log_call(start, result, error):
+def _log_call(start, result, error, prompt="", patient_id=None, call_type=None):
     import csv, datetime, gemini_client
-    with open("gemini_log.csv", "a", newline="") as f:
-        csv.writer(f).writerow([datetime.datetime.now().isoformat(timespec="seconds"), result,
-                                round(time.time() - start, 1),
-                                getattr(gemini_client, "last_model_used", ""), error]) 
- 
+    from db import log_ai_call
+    now = datetime.datetime.now().replace(microsecond=0)
+    seconds = round(time.time() - start, 1)
+    model = getattr(gemini_client, "last_model_used", "") if result == "ok" else ""
+    tokens = len(prompt) // 4   # estimate: 1 token is about 4 characters
+    try:
+        log_ai_call(now, result, seconds, model, error, tokens, patient_id=patient_id, call_type=call_type)
+    except Exception:  # database unreachable: keep the call in the CSV instead
+        with open("gemini_log.csv", "a", newline="") as f:
+            csv.writer(f).writerow([now.isoformat(), result, seconds, model, error, tokens])
  
 MAX_TURNS = 15                     # patient replies per check-in
 EXIT_WORDS = {"bye", "goodbye", "exit", "quit", "stop"}
