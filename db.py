@@ -295,7 +295,59 @@ def close_concern_by_clinician(patient_id, concern):
         return cur.rowcount
     finally:
         conn.close()
-        
+
+# ---------- Semantic search (memory v3) ----------
+
+def get_concerns_for_search(patient_id):
+    """All of a patient's concerns, any status, with their stored embedding (may be NULL)."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ConcernID, Concern, Category, Status, Trend, FirstMentioned, LastUpdated, Notes, "
+            "Embedding FROM PatientConcerns WHERE PatientID = ?",
+            patient_id,
+        )
+        return _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+
+def get_older_sessions_for_search(patient_id, skip_recent=5):
+    """Check-ins older than the ones already in the prompt, with their embedding (may be NULL)."""
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT SessionID, SessionDate, ConversationSummary, SummaryEmbedding FROM Sessions "
+            "WHERE PatientID = ? AND ConversationSummary IS NOT NULL "
+            "ORDER BY SessionDate DESC OFFSET ? ROWS",
+            patient_id, skip_recent,
+        )
+        return _rows_to_dicts(cur)
+    finally:
+        conn.close()
+
+
+def save_concern_embedding(concern_id, embedding_json):
+    conn = get_connection()
+    try:
+        conn.cursor().execute("UPDATE PatientConcerns SET Embedding = ? WHERE ConcernID = ?",
+                              embedding_json, concern_id)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_session_embedding(session_id, embedding_json):
+    conn = get_connection()
+    try:
+        conn.cursor().execute("UPDATE Sessions SET SummaryEmbedding = ? WHERE SessionID = ?",
+                              embedding_json, session_id)
+        conn.commit()
+    finally:
+        conn.close()
+
 # ---------- Registration and medical reports ----------
 
 def create_patient(full_name, email, password_hash, date_of_birth, baseline_weight_kg=None):

@@ -22,6 +22,7 @@ from extraction import EXTRACT_PROMPT, parse_extraction
 from gemini_client import get_ai_response_with_file
 from escalation import higher, primary_contact, trend_escalation
 from main import ask_gemini, MAX_TURNS, EXIT_WORDS
+from semantic import find_related
 from prompts import build_checkin_prompt, build_summary_prompt, parse_summary_response
 
 app = FastAPI(title="Ana Remembers API")
@@ -186,6 +187,7 @@ def _ana_turn(checkin_id, c):
     If Gemini can't be reached, the check-in stays open so the patient can retry."""
     last_message = c["transcript"][-1][1]
     last_turn = c["turns"] >= MAX_TURNS or last_message.lower().strip(" .!") in EXIT_WORDS
+    _add_related_memory(c, last_message)
     try:
         raw = ask_gemini(build_summary_prompt(c["ctx"], c["transcript"], last_turn=last_turn))
     except Exception as e:
@@ -211,6 +213,23 @@ def _ana_turn(checkin_id, c):
     session_id = _save_checkin(checkin_id) if done else None
     return {"ana_reply": result["ana_reply"], "done": done, "session_id": session_id}
 
+def _add_related_memory(c, text):
+    """Semantic search: add older concerns/check-ins that mean something similar to what the
+    patient just said. Code searches, Gemini judges whether it is really the same thing.
+    If the embedding model can't be reached, Ana simply works without it."""
+    try:
+        found = find_related(c["patient_id"], text, c["ctx"])
+    except Exception as e:
+        print(f"[Semantic search skipped: {e}]")
+        return
+    related = c["ctx"].setdefault("related", {"concerns": {}, "sessions": {}})
+    for row in found["concerns"]:
+        related["concerns"][row["Concern"]] = row
+    for row in found["sessions"]:
+        related["sessions"][row["SessionID"]] = row
+    if found["concerns"] or found["sessions"]:
+        names = [f"{r['Concern']} ({r['Score']})" for r in found["concerns"]]
+        print(f"[Semantic search: '{text[:40]}' -> concerns {names}, {len(found['sessions'])} older check-ins]")
 
 def _own_checkin(checkin_id, me):
     c = CHECKINS.get(checkin_id)

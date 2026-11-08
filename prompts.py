@@ -38,7 +38,12 @@ MEMORY
   check-ins. Keep them in mind and follow up on the important ones over time, one at a time.
   Status "improving" means the patient said it got better or went away, but it is not
   confirmed yet: check gently that it is still better, without doubting the patient.
-- PAST CONCERNS were resolved earlier. If one comes back, say so gently (e.g. "you
+- POSSIBLY RELATED EARLIER RECORDS were found by similar meaning. Patients often describe
+  the same problem in different words ("my heart beats very fast" = palpitations). If the
+  patient is describing one of these, treat it as that concern (mention it naturally and
+  use its exact name in concerns). If it is clearly something else (e.g. belly swelling is
+  not ankle swelling), ignore it. Never say the patient told you something that isn't there.
+  - PAST CONCERNS were resolved earlier. If one comes back, say so gently (e.g. "you
   mentioned your ankles were swollen a few weeks ago, and it had settled"), ask whether
   it feels the same as before, and suggest letting their GP know it has returned.
   A returning symptom is not an emergency by itself unless it is severe.
@@ -172,12 +177,29 @@ ONGOING CONCERNS, still open however long ago (concern | type | status | trend |
 PAST CONCERNS, resolved in the last 90 days (concern | type | first mentioned | resolved on | notes)
 {_format_list(ctx.get("resolved_concerns", []), ["Concern", "Category", "FirstMentioned", "LastUpdated", "Notes"])}
 
-CARE CONTACTS (role | name | phone). Emergencies: always 112.
+{_related_block(ctx)}CARE CONTACTS (role | name | phone). Emergencies: always 112.
 {_format_list(ctx.get("care_contacts", []), ["Role", "Name", "Phone"])}
 {_care_alert(ctx)}
 RECENT CHECK-INS, newest first (date | medication taken | summary)
 {_format_list(ctx["recent_sessions"], ["SessionDate", "MedicationTaken", "ConversationSummary"],
               empty="No earlier check-ins. This is the first one.")}"""
+
+def _related_block(ctx):
+    """Semantic search results (memory v3): found by similar meaning, may or may not match."""
+    related = ctx.get("related") or {}
+    concerns = list((related.get("concerns") or {}).values())
+    sessions = list((related.get("sessions") or {}).values())
+    if not concerns and not sessions:
+        return ""
+    text = ("POSSIBLY RELATED EARLIER RECORDS, found automatically by similar meaning to what the "
+            "patient said. They may or may not be about the same thing.\n")
+    if concerns:
+        text += "Concerns (concern | type | status | first mentioned | last updated | notes):\n"
+        text += _format_list(concerns, ["Concern", "Category", "Status", "FirstMentioned", "LastUpdated", "Notes"]) + "\n"
+    if sessions:
+        text += "Older check-ins (date | summary):\n"
+        text += _format_list(sessions, ["SessionDate", "ConversationSummary"]) + "\n"
+    return text + "\n"
 
 def _care_alert(ctx):
     """Python's trend rule (escalation.py), not Gemini, decides this alert."""
@@ -265,9 +287,9 @@ Return ONLY valid JSON, no extra text, in this exact shape:
   or the patient hinted at not wanting to live; otherwise "none". escalation_reason says
   why in a few words.
 - concerns: every health issue discussed in today's check-in so far. If it is the same
-  issue as one in ONGOING CONCERNS or PAST CONCERNS, use exactly that name; otherwise a
-  short new name (e.g. "ankle swelling"). If it is in PAST CONCERNS and has come back, use
-  status "open" and trend "returned". Mark "resolved" only if the patient clearly says it
+  issue as one in ONGOING CONCERNS, PAST CONCERNS or POSSIBLY RELATED EARLIER RECORDS, use
+  exactly that name; otherwise a short new name (e.g. "ankle swelling"). If it is in PAST CONCERNS and has come back,
+  use status "open" and trend "returned". Mark "resolved" only if the patient clearly says it
   is gone and nothing in the records contradicts it (the system then marks it "improving"
   and closes it only after it stays gone for several check-ins); if the patient has memory
   problems or it contradicts earlier check-ins, keep it "open" and explain in the note. Use [] if
