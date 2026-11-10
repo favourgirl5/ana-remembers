@@ -47,7 +47,7 @@ def show_schema():
         conn.close()
 
 
-def get_patient_context(patient_id, recent_sessions=5):
+def get_patient_context(patient_id, recent_sessions=3):
     """Everything Ana needs for a check-in. Email and PasswordHash are never selected."""
     conn = get_connection()
     try:

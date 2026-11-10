@@ -29,7 +29,8 @@ last_model_used = None  # shown in logs (gemini_log.csv)
 
 def _ask_portkey(content):
     response = portkey.chat.completions.create(
-        model=PORTKEY_MODEL, messages=[{"role": "user", "content": content}])
+        model=PORTKEY_MODEL, messages=[{"role": "user", "content": content}],
+        reasoning_effort=os.getenv("REASONING_EFFORT", "low"))
     return response.choices[0].message.content
 
 
