@@ -388,11 +388,13 @@ export default function CheckInScreen({ patient, settings }) {
             style={styles.input}
             value={input}
             onChangeText={setInput}
-            placeholder={listening ? 'Listening…' : 'Or tell Ana in your own words…'}
+            placeholder={
+              listening ? 'Listening…' : busy ? 'Ana is thinking… you can already type' : 'Or tell Ana in your own words…'
+            }
             placeholderTextColor={colors.muted}
             onSubmitEditing={() => handleSend(input)}
             returnKeyType="send"
-            editable={!busy}
+            submitBehavior="submit"
           />
           {canListen && (
             <Pressable
