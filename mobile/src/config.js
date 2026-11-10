@@ -8,4 +8,4 @@ export const PATIENT_ID = 1;
 // - On a phone, use the laptop's WiFi address (Expo shows it as "Metro: exp://192.168.0.102:8081")
 //   and start the API with:  python -m uvicorn api:app --reload --host 0.0.0.0
 export const API_URL =
-  Platform.OS === 'web' ? 'http://127.0.0.1:8000' : 'http://192.168.0.102:8000';
+  Platform.OS === 'web' ? `http://${window.location.hostname}:8000` : 'http://145.93.93.98:8000';
