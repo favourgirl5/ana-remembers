@@ -8,8 +8,8 @@ can see it.
 """
 from datetime import datetime
 
-TREND_MIN_COUNT = 3   # worse in at least this many check-ins in a row...
-TREND_MIN_DAYS = 21   # ...over at least this many days
+TREND_MIN_COUNT = 3   # worse at least this many times...
+TREND_MIN_DAYS = 21   # ...within this many days, even with better days in between
 
 LEVELS = {None: 0, "none": 0, "urgent": 1, "emergency": 2}
 
@@ -24,7 +24,7 @@ def worsening_trends(open_concerns):
         since = c.get("WorseSince")
         if not since or (c.get("WorseCount") or 0) < TREND_MIN_COUNT:
             continue
-        if (now - datetime.fromisoformat(str(since))).days >= TREND_MIN_DAYS:
+        if (now - datetime.fromisoformat(str(since))).days <= TREND_MIN_DAYS:
             hits.append(c["Concern"])
     return hits
 
@@ -34,7 +34,7 @@ def trend_escalation(open_concerns):
     hits = worsening_trends(open_concerns)
     if not hits:
         return None, None
-    return "urgent", f"Worsening for {TREND_MIN_DAYS}+ days without improvement: {', '.join(hits)}"
+    return "urgent", f"Worse {TREND_MIN_COUNT} times within {TREND_MIN_DAYS} days: {', '.join(hits)}"
 
 
 def higher(current, new):

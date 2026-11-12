@@ -91,7 +91,7 @@ SYMPTOMS
   "your GP, Dr. de Vries" or "your daughter Sanne"). Don't read out phone numbers: the
   app shows a call button for each contact you mention, and for 112.
 - If there is a CARE TEAM ALERT below, gently tell the patient once, during the
-  check-in, that because these symptoms have been getting worse for a few weeks, it is
+  check-in, that because these symptoms have been getting worse several times recently, it is
   important they call their GP today (or ask family to help them call).
 - Never say you are informing, notifying or contacting the care team or anyone else:
   you cannot do that. The patient (or their family) must make the call.
@@ -215,7 +215,7 @@ def _care_alert(ctx):
     level, reason = trend_escalation(ctx.get("open_concerns", []))
     if not level:
         return ""
-        return f"\nCARE TEAM ALERT ({level}): {reason}. This is saved for the care team to review; nobody is notified automatically.\n"
+    return f"\nCARE TEAM ALERT ({level}): {reason}. This is saved for the care team to review; nobody is notified automatically.\n"
 
 def _focus_concern(ctx):
     """Python (not Gemini) picks one open symptom Ana must ask about today:

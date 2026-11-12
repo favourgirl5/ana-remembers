@@ -221,10 +221,22 @@ def _add_related_memory(c, text):
     """Semantic search: add older concerns/check-ins that mean something similar to what the
     patient just said. Code searches, Gemini judges whether it is really the same thing.
     If the embedding model can't be reached, Ana simply works without it."""
+    import time
+    from datetime import datetime
+    from db import log_ai_call
+    start = time.time()
     try:
         found = find_related(c["patient_id"], text, c["ctx"])
+        result, error = "ok", ""
     except Exception as e:
+        found, result, error = None, "failed", str(e)[:200]
         print(f"[Semantic search skipped: {e}]")
+    try:
+        log_ai_call(datetime.now().replace(microsecond=0), result, round(time.time() - start, 1),
+                    "free/gemini-embedding-001", error, 0, patient_id=c["patient_id"], call_type="embedding")
+    except Exception:
+        pass
+    if found is None:
         return
     related = c["ctx"].setdefault("related", {"concerns": {}, "sessions": {}})
     for row in found["concerns"]:

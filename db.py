@@ -241,8 +241,8 @@ def upsert_concerns(patient_id, concerns):
                 # Patient says better/gone: 'improving', never closed on their word alone
                 cur.execute(
                     "UPDATE PatientConcerns SET Status = 'improving', BetterCount = BetterCount + 1, "
-                    "BetterSince = COALESCE(BetterSince, SYSDATETIME()), WorseCount = 0, "
-                    "WorseSince = NULL WHERE ConcernID = ? AND Status <> 'resolved'",
+                    "BetterSince = COALESCE(BetterSince, SYSDATETIME()) "
+                    "WHERE ConcernID = ? AND Status <> 'resolved'",
                     concern_id,
                 )
                 # Python closes it: better in 3 check-ins in a row, over at least 14 days
@@ -260,14 +260,14 @@ def upsert_concerns(patient_id, concerns):
                     concern_id,
                 )
                 if trend == "worse":
+                    # Count 'worse' reports in a 21-day window; good days in between don't reset it.
+                    # An older window has expired, so the count starts again.
                     cur.execute(
-                        "UPDATE PatientConcerns SET WorseCount = WorseCount + 1, "
-                        "WorseSince = COALESCE(WorseSince, SYSDATETIME()) WHERE ConcernID = ?",
-                        concern_id,
-                    )
-                elif trend == "same":
-                    cur.execute(
-                        "UPDATE PatientConcerns SET WorseCount = 0, WorseSince = NULL "
+                        "UPDATE PatientConcerns SET "
+                        "WorseCount = CASE WHEN WorseSince IS NULL OR DATEDIFF(DAY, WorseSince, SYSDATETIME()) > 21 "
+                        "THEN 1 ELSE WorseCount + 1 END, "
+                        "WorseSince = CASE WHEN WorseSince IS NULL OR DATEDIFF(DAY, WorseSince, SYSDATETIME()) > 21 "
+                        "THEN SYSDATETIME() ELSE WorseSince END "
                         "WHERE ConcernID = ?",
                         concern_id,
                     )
